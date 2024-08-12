@@ -1,0 +1,3 @@
+packages:
+  - "apps/*" # support glob pattern
+  - "packages/*"
