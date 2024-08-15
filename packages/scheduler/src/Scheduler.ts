@@ -17,6 +17,9 @@ import {
 } from "./SchedulerPriorities";
 import { getCurrentTime, isFn } from "shared/utils";
 
+// arg: 是否時間切片到了，過期了嗎？
+type Callback = (arg: boolean) => Callback | null | boolean;
+
 // 任務進入 scheduler 後被封裝成 Task
 export type Task = {
   id: number;
@@ -39,6 +42,14 @@ let isPerformingWork = false;
  */
 let isHostCallbackScheduled = false;
 /**
+ * ! 延遲任務的計時器
+ */
+let taskTimeoutId = -1;
+/**
+ * ! 主線程是否正在倒計時調度中
+ */
+let isHostTimeoutScheduled = false;
+/**
  * ! 宏任務不能重複創建
  */
 let isMessageLoopRunning = false;
@@ -48,17 +59,30 @@ let taskIdCounter = 1;
 const taskQueue: Array<Task> = [];
 // * 當前任務池
 let currentTask: Task | null = null;
+// * 延遲任務池
+const timerQueue: Array<Task> = [];
 let currentPriorityLevel: PriorityLevel = NoPriority;
 
-// arg: 是否時間切片到了，過期了嗎？
-type Callback = (arg: boolean) => Callback | null | boolean;
 /**
  * * 任務調度器的入口，某任務進入調度器，等待調度
  * @param priorityLevel
  * @param callback
+ * @param options - {delay: 延遲任務}
  */
-function scheduleCallback(priorityLevel: PriorityLevel, callback: Callback) {
-  const startTime = getCurrentTime();
+function scheduleCallback(
+  priorityLevel: PriorityLevel,
+  callback: Callback,
+  options?: { delay: number }
+) {
+  const currentTime = getCurrentTime();
+  let startTime: number = currentTime;
+  if (typeof options === "object" && options !== null) {
+    let delay = options.delay;
+    if (typeof delay === "number" && delay > 0) {
+      startTime = currentTime + delay;
+    }
+  }
+
   // 理論上的過期時間 相當於執行時間，根據不同的優先級，給予不同的過期時間
   let timeout: number;
   switch (priorityLevel) {
@@ -91,14 +115,81 @@ function scheduleCallback(priorityLevel: PriorityLevel, callback: Callback) {
     expirationTime,
     sortIndex: -1,
   };
-  newTask.sortIndex = expirationTime;
-  push(taskQueue, newTask);
 
-  // ! 主線程沒有在忙，而且也沒有時間切片在執行
-  if (!isHostCallbackScheduled && !isPerformingWork) {
-    isHostCallbackScheduled = true;
-    requestHostCallback();
+  // 判斷是否是延遲任務
+  if (startTime > currentTime) {
+    newTask.sortIndex = startTime;
+    push(timerQueue, newTask);
+
+    // 如果沒有等待進行的任務並且這個延遲任務又是最優先的
+    if (peek(taskQueue) === null && newTask === peek(timerQueue)) {
+      // 如果主線程正在忙調度
+      if (isHostCallbackScheduled) {
+        // newTask 才是堆頂任務，應該會最先到達執行時間，但目前其他延遲任務正在倒計時，說明有問題！！
+        cancelHostTimeout();
+      } else {
+        isHostTimeoutScheduled = true;
+      }
+    }
+    requestHostTimeout(handleTimeout, startTime - currentTime);
+  } else {
+    push(taskQueue, newTask);
+    newTask.sortIndex = expirationTime;
+    // ! 主線程沒有在忙，而且也沒有時間切片在執行
+    if (!isHostCallbackScheduled && !isPerformingWork) {
+      isHostCallbackScheduled = true;
+      requestHostCallback();
+    }
   }
+}
+
+function advanceTimers(currentTime: number) {
+  let timer = peek(timerQueue);
+  while (timer !== null) {
+    if (timer.callback === null) {
+      // 無效任務
+      pop(timerQueue);
+    } else if (timer.startTime <= currentTime) {
+      // 已經到達開始時間應該要被推入
+      pop(timerQueue);
+      timer.sortIndex = timer.expirationTime;
+      push(taskQueue, timer);
+    } else {
+      // 有效任務
+      break;
+    }
+  }
+}
+
+function handleTimeout(currentTime: number) {
+  isHostTimeoutScheduled = false;
+  advanceTimers(currentTime);
+
+  if (!isHostCallbackScheduled) {
+    if (peek(taskQueue) !== null) {
+      isHostCallbackScheduled = true;
+      requestHostCallback();
+    } else {
+      const firstTimer = peek(timerQueue);
+      if (firstTimer !== null) {
+        requestHostTimeout(handleTimeout, firstTimer.startTime - currentTime);
+      }
+    }
+  }
+}
+
+function requestHostTimeout(
+  callback: (currentTime: number) => void,
+  ms: number
+) {
+  taskTimeoutId = setTimeout(() => {
+    callback(getCurrentTime());
+  }, ms);
+}
+
+function cancelHostTimeout() {
+  clearTimeout(taskTimeoutId);
+  taskTimeoutId = -1;
 }
 
 // 主線程開始處理 callback，發起調度
@@ -140,7 +231,7 @@ function performWorkUntilDeadline() {
   }
 }
 
-function flushWork(initialTime: number) {
+function flushWork(initialTime: number): boolean {
   isHostCallbackScheduled = false;
   isPerformingWork = true;
   let previousPriorityLevel = currentPriorityLevel;
@@ -195,6 +286,7 @@ function shouldYieldToHost() {
  */
 function workLoop(initialTime: number): boolean {
   let currentTime = initialTime;
+  advanceTimers(currentTime);
   // 取出優先級最高的任務
   currentTask = peek(taskQueue);
   while (currentTask !== null) {
@@ -209,9 +301,11 @@ function workLoop(initialTime: number): boolean {
       // 說不定執行完 callback 後，還回傳 callback
       const continuationCallback = callback(didUserCallbackTimeout);
       currentTask.callback = null;
+      currentTime = getCurrentTime();
       currentPriorityLevel = currentTask.priorityLevel;
       if (isFn(continuationCallback)) {
         currentTask.callback = continuationCallback;
+        advanceTimers(currentTime);
         return true;
       } else {
         // 因為 taskQueue 是動態的，在執行 callback 期間可能又有其他任務被調度進去
@@ -220,6 +314,7 @@ function workLoop(initialTime: number): boolean {
           pop(taskQueue);
         }
       }
+      advanceTimers(currentTime);
     } else {
       pop(taskQueue);
     }
@@ -230,22 +325,13 @@ function workLoop(initialTime: number): boolean {
   if (currentTask !== null) {
     return true;
   } else {
+    const firstTimer = peek(timerQueue);
+    if (firstTimer !== null) {
+      requestHostTimeout(handleTimeout, firstTimer.startTime - currentTime);
+    }
     return false;
   }
 }
-
-let eventTasks: string[] = [];
-
-scheduleCallback(NormalPriority, () => {
-  eventTasks.push("task1");
-  return false;
-});
-scheduleCallback(NormalPriority, () => {
-  eventTasks.push("task2");
-  return false;
-});
-
-console.log("eventTasks", eventTasks);
 
 export {
   NoPriority,

@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { peek, pop, push, Node, Heap } from "../src/SchedulerMinHeap";
 
-let idCount = 0;
 function createNode(val: number): Node {
-  return { sortIndex: val, id: idCount++ };
+  return { sortIndex: val, id: val };
 }
 
 describe("test min heap", () => {
@@ -13,21 +12,18 @@ describe("test min heap", () => {
   });
 
   it("heap length === 1, peek equal to createNode(1", () => {
-    const node = createNode(1);
-    const tasks: Heap<Node> = [node];
-    expect(peek(tasks)).toEqual(node);
+    const tasks: Heap<Node> = [createNode(1)];
+    expect(peek(tasks)).toEqual(createNode(1));
   });
 
   it("heap length > 1, test push and pop", () => {
-    const node1 = createNode(1);
-    const node0 = createNode(0);
     const tasks: Heap<Node> = [createNode(2)];
-    push(tasks, node1);
+    push(tasks, createNode(1));
     push(tasks, createNode(3));
-    expect(peek(tasks)).toEqual(node1);
-    push(tasks, node0);
-    expect(peek(tasks)).toEqual(node0);
+    expect(peek(tasks)).toEqual(createNode(1));
+    push(tasks, createNode(0));
+    expect(peek(tasks)).toEqual(createNode(0));
     pop(tasks);
-    expect(peek(tasks)).toEqual(node1);
+    expect(peek(tasks)).toEqual(createNode(1));
   });
 });
