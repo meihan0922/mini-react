@@ -34,25 +34,26 @@ export type Task = {
 };
 
 /**
- * ! 鎖頭，紀錄是否有work正在執行，避免重複調度
+ * 三把鎖 - 避免重複調度
+ * 如果任務一直進來，瘋狂跑 requestHostCallback -> schedulePerformWorkUntilDeadline，
+ * 才需要鎖，只有 task queue 被清空了（也就是目前所有的任務有被執行完），scheduler 才會重新發起一次調度請求。
+ * - `isHostCallbackScheduled`： 正在等待 callback 被回調；(scheduleCallback 被設成 true，flushwork 被設成 false)
+ * - `isPerformingWork`： callback 被回調了，正在運行 work loop；(flushwork 開始被設成 true，結束 false)
+ * - `isMessageLoopRunning`： 無數個 work loop 之後，task queue 終於被清空。(requestHostCallback 發起調度時間切片 schedulePerformWorkUntilDeadline 前，被設成 true。performWorkUntilDeadline 中，task queue 被清空，所有任務都執行完之後被設定為 false)
  */
+
+// ! 是否有任務正在執行
 let isPerformingWork = false;
-/**
- * ! 主線程是否正在調度中
- */
+//! 主線程是否正在調度中
 let isHostCallbackScheduled = false;
-/**
- * ! 延遲任務的計時器
- */
-let taskTimeoutId = -1;
-/**
- * ! 主線程是否正在倒計時調度中
- */
-let isHostTimeoutScheduled = false;
-/**
- * ! 宏任務不能重複創建
- */
+// ! 宏任務不能重複創建
 let isMessageLoopRunning = false;
+
+// ! 延遲任務的計時器
+let taskTimeoutId = -1;
+// ! 主線程是否正在倒計時調度中
+let isHostTimeoutScheduled = false;
+
 let taskIdCounter = 1;
 
 // * 任務池，最小堆
@@ -136,6 +137,7 @@ function scheduleCallback(
     push(taskQueue, newTask);
     newTask.sortIndex = expirationTime;
     // ! 主線程沒有在忙，而且也沒有時間切片在執行
+    // 時間切片內正在執行中！
     if (!isHostCallbackScheduled && !isPerformingWork) {
       isHostCallbackScheduled = true;
       requestHostCallback();
@@ -214,6 +216,7 @@ function schedulePerformWorkUntilDeadline() {
 function performWorkUntilDeadline() {
   if (isMessageLoopRunning) {
     const currentTime = getCurrentTime();
+    // ! 注意 這裏是紀錄時間切片的起始點，shouldYieldToHost 會扣除執行後當下的時間看是不是大於 5ms
     startTime = currentTime;
     let hasMoreWork = true;
 
@@ -222,7 +225,7 @@ function performWorkUntilDeadline() {
       hasMoreWork = flushWork(currentTime);
     } finally {
       if (hasMoreWork) {
-        // 還有就申請下一個時間切片
+        // 任務堆都被清空了，可以再發起調度了
         schedulePerformWorkUntilDeadline();
       } else {
         isMessageLoopRunning = false;
@@ -291,6 +294,11 @@ function workLoop(initialTime: number): boolean {
   currentTask = peek(taskQueue);
   while (currentTask !== null) {
     // 如果當前的任務沒有過期，但時間已經到了，應該要跳出回圈
+    // 如果，如果當前時間戳大於expirationTime的值（也就是說十分緊急！），也就無法跳出while(){}循環，只能去執行這個過期任務。
+    // 同時，scheduler 還有透過didUserCallbackTimeout來把「任務過期了」這個訊息告知呼叫方，讓呼叫方自己看著辦。
+    // 就react 這個呼叫方而言，它將會用「同步不可中斷」的方式去這個任務。
+    // scheduler 只是負責告知呼叫方目前這個任務已經過期了。
+    // time slicing 並不是總是能奏效的。它能奏效的前提是在一個時間片的時間內所執行的任務沒有過期任務。
     if (currentTask.expirationTime > currentTime && shouldYieldToHost()) {
       break;
     }

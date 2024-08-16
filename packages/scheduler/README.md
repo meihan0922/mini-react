@@ -4,9 +4,9 @@
 
    1. 有兩個任務池，一個是當前正在執行的 - `currentTask`，一個是排隊中的（最小堆）- `taskQueue`。
    2. `currentPriorityLevel` - 紀錄當前處理的任務優先級，供之後判斷是否優先執行
-   3. `isHostCallbackScheduled` - 主線程是否正在調度中，會在開始調度後，設定為 true，執行任務前，設定為 false
-   4. `isPerformingWork` - 是否有任務正在執行，執行前設定為 true，執行完畢設定為 false
-   5. `isMessageLoopRunning` - 是否已經申請過時間切片，開始申請後設定為 true，申請完後設定為 false
+   3. `isHostCallbackScheduled` - 主線程是否正在調度中
+   4. `isPerformingWork` - 是否有任務正在執行
+   5. `isMessageLoopRunning` - 是否已經申請過時間切片
 
 2. `scheduleCallback`
    1. 當有新的任務時，會按照優先等級，封裝成 Task 物件，推入最小堆，
@@ -44,6 +44,14 @@
 6. 建立取消正在執行的任務堆的某任務函式 & export
 7. 建立取得當前正在執行的任務的優先等級函式 & export
 8. 是否要終止任務，把控制權交給主線程函式 & export
+
+### 三把鎖 - 避免重複調度
+
+如果任務一直進來，瘋狂跑 requestHostCallback -> schedulePerformWorkUntilDeadline，才會需要三把鎖`isHostCallbackScheduled` `isPerformingWork` `isMessageLoopRunning`，只有 task queue 被清空了（也就是目前所有的任務有被執行完），scheduler 才會重新發起一次調度請求。
+
+- `isHostCallbackScheduled`： 正在等待 callback 被回調；(scheduleCallback 被設成 true，flushwork 被設成 false)
+- `isPerformingWork`： callback 被回調了，正在運行 work loop；(flushwork 開始被設成 true，結束 false)
+- `isMessageLoopRunning`： 無數個 work loop 之後，task queue 終於被清空。(requestHostCallback 發起調度時間切片 schedulePerformWorkUntilDeadline 前，被設成 true。performWorkUntilDeadline 中，task queue 被清空，所有任務都執行完之後被設定為 false)
 
 ### 造任務池，當前任務優先級
 
@@ -145,6 +153,7 @@ function scheduleCallback(priorityLevel: PriorityLevel, callback: Callback) {
   push(taskQueue, newTask);
 
   // ! 主線程沒有在忙，而且也沒有時間切片在執行
+  // 時間切片內正在執行中！
   if (!isHostCallbackScheduled && !isPerformingWork) {
     isHostCallbackScheduled = true;
     requestHostCallback();
@@ -163,7 +172,7 @@ function scheduleCallback(priorityLevel: PriorityLevel, callback: Callback) {
 ```ts
 // 主線程開始處理 callback，發起調度
 function requestHostCallback() {
-  // 沒有其他的異步任務
+  // 上個任務池結束，沒有在調度中，可以發起調度
   if (!isMessageLoopRunning) {
     isMessageLoopRunning = true;
     schedulePerformWorkUntilDeadline();
@@ -227,6 +236,7 @@ function performWorkUntilDeadline() {
         // 還有就申請下一個時間切片
         schedulePerformWorkUntilDeadline();
       } else {
+        // 任務堆都被清空了，可以再發起調度了
         isMessageLoopRunning = false;
       }
     }
@@ -259,6 +269,8 @@ function workLoop(initialTime: number): boolean {
   currentTask = peek(taskQueue);
   while (currentTask !== null) {
     // 如果當前的任務沒有過期，但時間已經到了，應該要跳出回圈
+    // 如果，如果當前時間戳大於expirationTime的值（也就是說十分緊急！），也就無法跳出while(){}循環，只能去執行這個過期任務。同時，scheduler 還有透過didUserCallbackTimeout來把「任務過期了」這個訊息告知呼叫方，讓呼叫方自己看著辦。就react 這個呼叫方而言，它將會用「同步不可中斷」的方式去這個任務。 scheduler 只是負責告知呼叫方目前這個任務已經過期了。
+    // time slicing 並不是總是能奏效的。它能奏效的前提是在一個時間片的時間內所執行的任務沒有過期任務。
     if (currentTask.expirationTime > currentTime && shouldYieldToHost()) {
       break;
     }
@@ -364,6 +376,12 @@ function shouldYieldToHost() {
             1. 否，則開啟計時器
 3. `workLoop`，一開始必須先整個延遲任務堆處理，並且在 while 迴圈處理任務當中，每處理完一個任務，都應該要去驗證延遲任務堆是否到期，重新放入任務堆。
 4. 如果當前任務執行完畢，檢查延遲任務堆，如果不為空，要發起計時器。
+
+### 延時任務轉普通任務的時機?
+
+- 1. 開始 task queue 的 work loop 之前
+- 2. 在 work loop 的每一個迭代中，當執行完一次任務後
+- 3. 當 work loop 中斷後且 task queue 已經清空，scheduler 就會嘗試去檢查 timer queue，看看是否有延遲到期的任務可以轉移到 task queue 中去
 
 ### `scheduleCallback` 加入延遲任務參數
 
@@ -512,3 +530,27 @@ function advanceTimers(currentTime: number) {
   }
 }
 ```
+
+### 實現真正的 time slicing
+
+task queue 有三個任務，第一個用時 3ms，第二個用時 4ms，第三個用時 5ms，那麼這個 work loop 就會佔用主執行緒 7ms 才會退出。 scheduler ，對 work loop 佔用時間的檢查只會發生在「任務執行之前」。
+所以單靠 scheduler 會是 `[[3ms, 4ms], [5ms]]` ，第一個時間片就執行了 7ms!
+只能靠 react 從 callback 內部去結束呼叫。 `performConcurrentWorkOnRoot()` 呼叫堆疊上的 `workLoopConcurrent()` 函數也有一個時間片檢查的原因：因為它需要配合 scheduler 一起來完成 time slicing 的能力：
+
+```js
+function workLoopConcurrent() {
+  // Perform work until Scheduler asks us to yield
+  while (workInProgress !== null && !shouldYield()) {
+    performUnitOfWork(workInProgress);
+  }
+}
+```
+
+在 react 端也執行檢查，react fiber 的 work loop 在對下一個 fiber node 執行 work 之前。（當然如果 fiber node 執行時間超過 5ms 就是另一回事了。)
+
+---
+
+學習資料：
+
+> (2023 年，你是時候要掌握 react 的並發渲染了(2) - scheduler)[https://juejin.cn/post/7278597256957935628#heading-24]
+> (bubucuo React18 底层源码深入剖析)[https://github.com/bubucuo/mini-react]
