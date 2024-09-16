@@ -246,3 +246,82 @@ export function createFiberRoot(
   return root;
 }
 ```
+
+## 實現入口 createRoot -> @react-dom
+
+### 1. 建立 ReactDOMRoot
+
+> 主要在 @react-dom/src/client/ReactDOMRoot.ts
+
+```ts
+import type { FiberRoot } from "@react-reconciler/src/ReactInternalTypes";
+import type { ReactNodeList } from "@shared/ReactTypes";
+import {
+  ConcurrentRoot,
+  createFiberRoot,
+} from "@react-reconciler/src/ReactFiberRoot";
+import { updateContainer } from "@react-reconciler/src/ReactFiberReconciler";
+
+type RootType = {
+  render: (children: ReactNodeList) => void;
+  _internalRoot: FiberRoot;
+};
+
+// 創造一個類型，掛載 render 和 unmount 的方法，並且創造和 fiber 的連結
+// 把 fiber 掛載到 _internalRoot 上面
+function ReactDOMRoot(internalRoot: FiberRoot) {
+  this._internalRoot = internalRoot;
+}
+
+ReactDOMRoot.prototype.render = function (children: ReactNodeList) {
+  // 拿到 fiberRoot
+  const root = this._internalRoot;
+  updateContainer(children, root);
+};
+
+function createRoot(
+  container: Element | Document | DocumentFragment
+): RootType {
+  const root = createFiberRoot(container, ConcurrentRoot);
+
+  return new ReactDOMRoot(root);
+}
+
+export default { createRoot };
+```
+
+### 2. updateContainer: 調用 render 時，子組件 交給 react
+
+> @react-reconciler/src/ReactFiberReconciler.ts
+
+```ts
+import { ReactNodeList } from "@shared/ReactTypes";
+import type { Container, Fiber, FiberRoot } from "./ReactInternalTypes";
+import type { RootTag } from "./ReactFiberRoot";
+import { createFiberRoot } from "./ReactFiberRoot";
+
+// 輸出給 react-dom，實現 react 的入口，創造出 fiberRoot, fiber 樹狀結構掛載在實例根節點上
+export function createContainer(containerInfo: Container, tag: RootTag) {
+  return createFiberRoot(containerInfo, tag);
+}
+
+// 1. 獲取 current, lane
+// 2. 創建 update
+// 3. update 入隊放到暫存區
+// 4. scheduleUpdateOnFiber 啟動調度
+// 5. entangleTranstions
+export function updateContainer(element: ReactNodeList, container: FiberRoot) {
+  // 組件初次渲染
+
+  // 1. 獲取 current, lane
+  const current = container.current;
+  // 源碼中，初次渲染 子element 會作為 update.payload
+  // const eventTime = getCurrentTime();
+  // const update = createUpdate(eventTime, lane);
+  // update.payload = { element };
+  // 暫時簡寫放到 memoizedState
+  current.memoizedState = { element };
+
+  // scheduleUpdateOnFiber(root, current, lane, eventTime);
+}
+```
