@@ -325,3 +325,79 @@ export function updateContainer(element: ReactNodeList, container: FiberRoot) {
   // scheduleUpdateOnFiber(root, current, lane, eventTime);
 }
 ```
+
+## scheduleUpdateOnFiber 調度更新開始 -> @react-reconciler/ReactFiberWorkLoop
+
+在 `updateContainer()` 中調度 `scheduleUpdateOnFiber()`，這也是之後頁面觸發渲染都會執行的函式，會將指針指向正在處理的節點
+
+> @react-reconciler/src/ReactFiberWorkLoop.ts
+
+```ts
+import { Lane } from "./ReactFiberLane";
+import { Fiber, FiberRoot } from "./ReactInternalTypes";
+
+// 創建指針，指向正在處理的節點
+let workInProgress: Fiber | null = null;
+let workInProgressRoot: FiberRoot | null = null;
+
+// 頁面初次渲染、類組件 setState/forceUpdate、函數組件 setState 都會走到此
+export function scheduleUpdateOnFiber(root: FiberRoot, fiber: Fiber) {
+  /**
+   * 源碼核心:
+   * 1. markRootUpdated: 標記根節點有一個 pending update
+   * 2. ensureRootIsScheduled：主要是創建微任務去啟動 scheduler 調度器，調度器再去執行 react-reconciler 的 workLoop
+   *    a. scheduleImmediateTask
+   *    b. processRootScheduleInMicroTask
+   *
+   * 但因為目前還沒處理 lane 先忽略掉 1.
+   **/
+
+  workInProgressRoot = root;
+  workInProgress = fiber;
+
+  ensureRootIsScheduled(root);
+}
+```
+
+### ensureRootIsScheduled -> scheduleTaskForRootDuringMicrotask
+
+將 FiberRoot 傳入，把調度任務加入微任務， 確保在當次瀏覽器工作循環執行啟動 scheduler 包中的調度，再去執行 react-reconciler 的 workLoop
+
+> @react-reconciler/src/ReactFiberRootScheduler.ts
+
+```ts
+import { preformConcurrentWorkOnRoot } from "./ReactFiberWorkLoop";
+import { FiberRoot } from "./ReactInternalTypes";
+import { scheduleCallback, NormalPriority } from "@scheduler";
+
+export function ensureRootIsScheduled(root: FiberRoot) {
+  // window 的方法，加入微任務，會去執行 scheduler包中的調度，確保在當次瀏覽器工作循環執行
+  queueMicrotask(() => {
+    scheduleTaskForRootDuringMicrotask(root);
+  });
+}
+
+// 調度
+export function scheduleTaskForRootDuringMicrotask(root: FiberRoot) {
+  // 準備要調度更新，又分為 render 和 commit 階段
+  // 這裡是入口
+  scheduleCallback(
+    NormalPriority,
+    preformConcurrentWorkOnRoot.bind(null, root)
+  );
+}
+```
+
+### scheduler 循環調度 react-reconciler workLoop 的入口 preformConcurrentWorkOnRoot
+
+入口點，執行 reconciler 兩階段
+
+1. render: 構建 fiber 樹(VDOM)
+2. commit: VDOM -> DOM
+
+```ts
+export function preformConcurrentWorkOnRoot() {
+  // ! 1. render: 構建 fiber 樹(VDOM)
+  // ! 2. commit: VDOM -> DOM
+}
+```

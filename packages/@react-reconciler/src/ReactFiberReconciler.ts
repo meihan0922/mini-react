@@ -2,6 +2,7 @@ import { ReactNodeList } from "@shared/ReactTypes";
 import type { Container, Fiber, FiberRoot } from "./ReactInternalTypes";
 import type { RootTag } from "./ReactFiberRoot";
 import { createFiberRoot } from "./ReactFiberRoot";
+import { scheduleUpdateOnFiber } from "./ReactFiberWorkLoop";
 
 // 輸出給 react-dom，實現 react 的入口，創造出 fiberRoot, fiber 樹狀結構掛載在實例根節點上
 export function createContainer(containerInfo: Container, tag: RootTag) {
@@ -25,5 +26,5 @@ export function updateContainer(element: ReactNodeList, container: FiberRoot) {
   // 暫時簡寫放到 memoizedState
   current.memoizedState = { element };
 
-  // scheduleUpdateOnFiber(root, current, lane, eventTime);
+  scheduleUpdateOnFiber(container, current);
 }
