@@ -1,6 +1,6 @@
-# mini-react
+# react-reconciler
 
-## 創建 Fiber 和 FiberRoot -> @mono/react-reconciler
+## 創建 Fiber 和 FiberRoot
 
 ### 1. 生成 fiber
 
@@ -10,9 +10,9 @@
 > 類型主要在 src/ReactInternalTypes.ts
 
 ```ts
-import { ReactElement, ReactFragment } from "@mono/shared/ReactTypes";
-import { REACT_FRAGMENT_TYPE } from "@mono/shared/ReactSymbols";
-import { isFn, isStr } from "@mono/shared/utils";
+import { ReactElement, ReactFragment } from "shared/ReactTypes";
+import { REACT_FRAGMENT_TYPE } from "shared/ReactSymbols";
+import { isFn, isStr } from "shared/utils";
 import {
   ClassComponent,
   Fragment,
@@ -190,7 +190,7 @@ function shouldConstruct(Component: Function) {
 ```ts
 import { NoLane, NoLanes, createLaneMap, NoTimestamp } from "./ReactFiberLane";
 import type { Container, FiberRoot } from "./ReactInternalTypes";
-import type { ReactNodeList } from "@mono/shared/ReactTypes";
+import type { ReactNodeList } from "shared/ReactTypes";
 import { createHostRootFiber } from "./ReactFiber";
 import { initializeUpdateQueue } from "./ReactFiberClassUpdateQueue";
 
@@ -244,160 +244,5 @@ export function createFiberRoot(
   initializeUpdateQueue(uninitializedFiber);
 
   return root;
-}
-```
-
-## 實現入口 createRoot -> @mono/react-dom
-
-### 1. 建立 ReactDOMRoot
-
-> 主要在 @mono/react-dom/src/client/ReactDOMRoot.ts
-
-```ts
-import type { FiberRoot } from "@mono/react-reconciler/src/ReactInternalTypes";
-import type { ReactNodeList } from "@mono/shared/ReactTypes";
-import {
-  ConcurrentRoot,
-  createFiberRoot,
-} from "@mono/react-reconciler/src/ReactFiberRoot";
-import { updateContainer } from "@mono/react-reconciler/src/ReactFiberReconciler";
-
-type RootType = {
-  render: (children: ReactNodeList) => void;
-  _internalRoot: FiberRoot;
-};
-
-// 創造一個類型，掛載 render 和 unmount 的方法，並且創造和 fiber 的連結
-// 把 fiber 掛載到 _internalRoot 上面
-function ReactDOMRoot(internalRoot: FiberRoot) {
-  this._internalRoot = internalRoot;
-}
-
-ReactDOMRoot.prototype.render = function (children: ReactNodeList) {
-  // 拿到 fiberRoot
-  const root = this._internalRoot;
-  updateContainer(children, root);
-};
-
-function createRoot(
-  container: Element | Document | DocumentFragment
-): RootType {
-  const root = createFiberRoot(container, ConcurrentRoot);
-
-  return new ReactDOMRoot(root);
-}
-
-export default { createRoot };
-```
-
-### 2. updateContainer: 調用 render 時，子組件 交給 react
-
-> @mono/react-reconciler/src/ReactFiberReconciler.ts
-
-```ts
-import { ReactNodeList } from "@mono/shared/ReactTypes";
-import type { Container, Fiber, FiberRoot } from "./ReactInternalTypes";
-import type { RootTag } from "./ReactFiberRoot";
-import { createFiberRoot } from "./ReactFiberRoot";
-
-// 輸出給 react-dom，實現 react 的入口，創造出 fiberRoot, fiber 樹狀結構掛載在實例根節點上
-export function createContainer(containerInfo: Container, tag: RootTag) {
-  return createFiberRoot(containerInfo, tag);
-}
-
-// 1. 獲取 current, lane
-// 2. 創建 update
-// 3. update 入隊放到暫存區
-// 4. scheduleUpdateOnFiber 啟動調度
-// 5. entangleTranstions
-export function updateContainer(element: ReactNodeList, container: FiberRoot) {
-  // 組件初次渲染
-
-  // 1. 獲取 current, lane
-  const current = container.current;
-  // 源碼中，初次渲染 子element 會作為 update.payload
-  // const eventTime = getCurrentTime();
-  // const update = createUpdate(eventTime, lane);
-  // update.payload = { element };
-  // 暫時簡寫放到 memoizedState
-  current.memoizedState = { element };
-
-  // scheduleUpdateOnFiber(root, current, lane, eventTime);
-}
-```
-
-## scheduleUpdateOnFiber 調度更新開始 -> @mono/react-reconciler/ReactFiberWorkLoop
-
-在 `updateContainer()` 中調度 `scheduleUpdateOnFiber()`，這也是之後頁面觸發渲染都會執行的函式，會將指針指向正在處理的節點
-
-> @mono/react-reconciler/src/ReactFiberWorkLoop.ts
-
-```ts
-import { Lane } from "./ReactFiberLane";
-import { Fiber, FiberRoot } from "./ReactInternalTypes";
-
-// 創建指針，指向正在處理的節點
-let workInProgress: Fiber | null = null;
-let workInProgressRoot: FiberRoot | null = null;
-
-// 頁面初次渲染、類組件 setState/forceUpdate、函數組件 setState 都會走到此
-export function scheduleUpdateOnFiber(root: FiberRoot, fiber: Fiber) {
-  /**
-   * 源碼核心:
-   * 1. markRootUpdated: 標記根節點有一個 pending update
-   * 2. ensureRootIsScheduled：主要是創建微任務去啟動 scheduler 調度器，調度器再去執行 react-reconciler 的 workLoop
-   *    a. scheduleImmediateTask
-   *    b. processRootScheduleInMicroTask
-   *
-   * 但因為目前還沒處理 lane 先忽略掉 1.
-   **/
-
-  workInProgressRoot = root;
-  workInProgress = fiber;
-
-  ensureRootIsScheduled(root);
-}
-```
-
-### ensureRootIsScheduled -> scheduleTaskForRootDuringMicrotask
-
-將 FiberRoot 傳入，把調度任務加入微任務， 確保在當次瀏覽器工作循環執行啟動 scheduler 包中的調度，再去執行 react-reconciler 的 workLoop
-
-> @mono/react-reconciler/src/ReactFiberRootScheduler.ts
-
-```ts
-import { preformConcurrentWorkOnRoot } from "./ReactFiberWorkLoop";
-import { FiberRoot } from "./ReactInternalTypes";
-import { scheduleCallback, NormalPriority } from "@mono/scheduler";
-
-export function ensureRootIsScheduled(root: FiberRoot) {
-  // window 的方法，加入微任務，會去執行 scheduler包中的調度，確保在當次瀏覽器工作循環執行
-  queueMicrotask(() => {
-    scheduleTaskForRootDuringMicrotask(root);
-  });
-}
-
-// 調度
-export function scheduleTaskForRootDuringMicrotask(root: FiberRoot) {
-  // 準備要調度更新，又分為 render 和 commit 階段
-  // 這裡是入口
-  scheduleCallback(
-    NormalPriority,
-    preformConcurrentWorkOnRoot.bind(null, root)
-  );
-}
-```
-
-### scheduler 循環調度 react-reconciler workLoop 的入口 preformConcurrentWorkOnRoot
-
-入口點，執行 reconciler 兩階段
-
-1. render: 構建 fiber 樹(VDOM)
-2. commit: VDOM -> DOM
-
-```ts
-export function preformConcurrentWorkOnRoot() {
-  // ! 1. render: 構建 fiber 樹(VDOM)
-  // ! 2. commit: VDOM -> DOM
 }
 ```

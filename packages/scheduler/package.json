@@ -1,16 +1,15 @@
 {
-  "name": "mini-react",
+  "name": "@mono/scheduler",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "pnpm --filter examples dev",
     "test": "vitest"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "devDependencies": {
-    "vitest": "^2.0.5"
+  "dependencies": {
+    "@mono/shared": "workspace:*"
   }
 }
