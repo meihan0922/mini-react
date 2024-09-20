@@ -86,6 +86,9 @@ importers:
 
   packages/react-reconciler:
     dependencies:
+      '@mono/react-dom':
+        specifier: workspace:*
+        version: link:../react-dom
       '@mono/scheduler':
         specifier: workspace:*
         version: link:../scheduler

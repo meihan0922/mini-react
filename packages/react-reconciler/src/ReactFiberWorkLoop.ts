@@ -35,9 +35,10 @@ export function scheduleUpdateOnFiber(root: FiberRoot, fiber: Fiber) {
   ensureRootIsScheduled(root);
 }
 
-export function preformConcurrentWorkOnRoot() {
+export function preformConcurrentWorkOnRoot(root: FiberRoot) {
   // ! 1. render: 構建 fiber 樹(VDOM)
   renderRootSync(root);
+  console.log("?????", root);
   // ! 2. commit: VDOM -> DOM
   //   commitRoot(root)
 }
@@ -51,7 +52,7 @@ function renderRootSync(root: FiberRoot) {
   prepareFreshStack(root);
 
   // ! 3. 遍歷構建 fiber 樹，深度優先遍歷
-  workLoopSync(root);
+  workLoopSync();
 
   // ! 4. render 結束，把數據還原
   executionContext = prevExecutionContext;
@@ -78,16 +79,17 @@ function workLoopSync() {
 
 /**
  * 1. beginWork
- *    a. 執行 unitOfWork 的創建
- *    b. 看有沒有要走diff，比方類組件shouldComponentUpdate 比較後走到 bailout,
+ *    a. 執行 unitOfWork 的 fiber 創建
+ *    b. 看有沒有要走diff，比方類組件 shouldComponentUpdate 比較後走到 bailout,
  *    c. 返回子節點
  * 2. complete
  * */
 function performUnitOfWork(unitOfWork: Fiber) {
-  // 老的 fiber
+  // 對應的 老的 current 節點
   const current = unitOfWork.alternate;
-  // 1. beginWork
+  // 1. beginWork，返回子節點
   let next = beginWork(current, unitOfWork);
+
   // 沒有子節點了
   if (next === null) {
     completeUnitWork(unitOfWork);
@@ -95,7 +97,7 @@ function performUnitOfWork(unitOfWork: Fiber) {
     workInProgress = next;
   }
 }
-// ? 我覺得應該是確認沒有子節點才會進入completeUnitWork，所以應該不用判斷 next !==null那邊的邏輯
+
 // 深度優先遍歷，子節點、兄弟節點、叔叔節點、爺爺節點....
 function completeUnitWork(unitOfWork: Fiber) {
   let completedWork: Fiber | null = unitOfWork;
@@ -103,6 +105,9 @@ function completeUnitWork(unitOfWork: Fiber) {
   do {
     const current = completedWork.alternate;
     const returnFiber = completedWork.return;
+    // 依照不同的節點 tag 生成節點，如果是函式組件也可能 還有子節點等等
+    // 如果自身處理完成，返回null
+    // 並且看有沒有兄弟節點，沒有則返回父節點，再處理父節點的兄弟節點
     let next = completeWork(current, completedWork);
 
     // 如果有下個 work 的話，next可能指向 child 或是 標記 next 是

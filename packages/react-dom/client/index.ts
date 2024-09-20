@@ -31,4 +31,4 @@ function createRoot(
   return new ReactDOMRoot(root);
 }
 
-export default { createRoot };
+export { createRoot };
