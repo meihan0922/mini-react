@@ -1,19 +1,8 @@
-import {
-  REACT_ELEMENT_TYPE,
-  REACT_FRAGMENT_TYPE,
-} from "@mono/shared/ReactSymbols";
+import { REACT_ELEMENT_TYPE } from "@mono/shared/ReactSymbols";
 import { ReactElement } from "@mono/shared/ReactTypes";
-import { isArray } from "@mono/shared/utils";
-import {
-  createFiberFromElement,
-  createFiberFromFragment,
-  createFiberFromText,
-} from "./ReactFiber";
-// import {updateFragment} from "./ReactFiberBeginWork";
-import { ChildDeletion, Forked, Placement, Update } from "./ReactFiberFlags";
-import { Lanes } from "./ReactFiberLane";
+import { createFiberFromElement } from "./ReactFiber";
+import { Placement } from "./ReactFiberFlags";
 import { Fiber } from "./ReactInternalTypes";
-import { Fragment, HostText } from "./ReactWorkTags";
 
 type ChildReconciler = (
   returnFiber: Fiber,
@@ -31,7 +20,7 @@ export const mountChildFibers: ChildReconciler = createChildReconciler(false);
 function createChildReconciler(shouldTrackSideEffect: boolean) {
   // 給 fiber 添加標記，flag
   function placeSingleChild(newFiber: Fiber) {
-    if (shouldTrackSideEffect && newFiber.alternate) {
+    if (shouldTrackSideEffect && newFiber.alternate === null) {
       newFiber.flags |= Placement;
     }
     return newFiber;

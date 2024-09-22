@@ -85,6 +85,8 @@ export function createWorkInProgress(current: Fiber, pendingProps: any): Fiber {
 
     // 把新的樹節點指向到舊的樹的節點上
     workInProgress.alternate = current;
+    // 把舊樹節點指向到新的樹的節點上
+    current.alternate = workInProgress;
   } else {
     // 已經存在節點了，但有更新！
     // 更新可能是 props, type
@@ -227,6 +229,7 @@ export function createFiberRoot(
   tag: RootTag,
   initialChildren: ReactNodeList
 ): FiberRoot {
+  // !注意#root 以containerInfo掛載FiberRoot上，之後commit會用到
   const root: FiberRoot = new FiberRootNode(containerInfo, tag);
 
   // Cyclic construction. This cheats the type system right now because
@@ -238,7 +241,7 @@ export function createFiberRoot(
   // fiber 的 stateNode 也要指向 FiberRoot
   uninitializedFiber.stateNode = root;
 
-  // 初始時，子節點會變成 element 掛載到 memoizedState 上
+  // ! 初始時，子節點會變成 element 掛載到 memoizedState 上
   const initialState: RootState = {
     element: initialChildren,
   };
@@ -267,7 +270,10 @@ import {
   ConcurrentRoot,
   createFiberRoot,
 } from "@mono/react-reconciler/src/ReactFiberRoot";
-import { updateContainer } from "@mono/react-reconciler/src/ReactFiberReconciler";
+import {
+  updateContainer,
+  createContainer,
+} from "@mono/react-reconciler/src/ReactFiberReconciler";
 
 type RootType = {
   render: (children: ReactNodeList) => void;
@@ -289,7 +295,7 @@ ReactDOMRoot.prototype.render = function (children: ReactNodeList) {
 function createRoot(
   container: Element | Document | DocumentFragment
 ): RootType {
-  const root = createFiberRoot(container, ConcurrentRoot);
+  const root = createContainer(container, ConcurrentRoot);
 
   return new ReactDOMRoot(root);
 }
@@ -453,7 +459,7 @@ function workLoopSync() {
 }
 ```
 
-## 第一階段 render -> performUnitOfWork()：兩階段 beginWork, completeUnitWork
+### 第一階段 render -> performUnitOfWork()：兩階段 beginWork, completeUnitWork
 
 1. beginWork
    1. 執行 unitOfWork 的 fiber 創建
@@ -477,7 +483,7 @@ function performUnitOfWork(unitOfWork: Fiber) {
 }
 ```
 
-### beginWork - 建立 fiber 結構
+#### beginWork - 建立 fiber 結構
 
 > react-reconciler/src/ReactFiberBeginWork.ts
 
@@ -530,7 +536,7 @@ function reconcileChildren(
   workInProgress: Fiber,
   nextChildren: any
 ) {
-  // 初次渲染，但根節點#rrot存在所以不會走到這
+  // 初次渲染，但根節點#root存在所以不會走到這
   if (current === null) {
     workInProgress.child = mountChildFibers(workInProgress, null, nextChildren);
   } else {
@@ -577,7 +583,7 @@ export const mountChildFibers: ChildReconciler = createChildReconciler(false);
 
 // 協調子節點
 function createChildReconciler(shouldTrackSideEffect: boolean) {
-  // 給 fiber 添加標記，flag
+  // 給 fiber 添加標記，flag，這邊會影響到之後 commit
   function placeSingleChild(newFiber: Fiber) {
     if (shouldTrackSideEffect && newFiber.alternate) {
       newFiber.flags |= Placement;
@@ -618,7 +624,7 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
 }
 ```
 
-### completeUnitWork - 深度優先遍歷，按照 fiber tag 建立真實 DOM
+#### completeUnitWork - 深度優先遍歷，按照 fiber tag 建立真實 DOM
 
 > react-reconciler/src/ReactFiberWorkLoop.ts
 
@@ -711,10 +717,9 @@ function appendAllChildren(parent: Element, workInProgress: Fiber) {
 }
 ```
 
-#### 看 fiber 建立的結果
+##### 看 fiber 建立的結果
 
-> 終端下 `pnpm run dev`
-> 此時，如果 examples 專案的 `main.jsx` 的結構是長這樣(目前只有單純寫純標籤節點)
+> 終端下 `pnpm run dev`，此時，如果 examples 專案的 `main.jsx` 的結構是長這樣(目前只有單純寫純標籤節點)
 
 ```tsx
 // import { createRoot } from "react-dom/client";
@@ -752,3 +757,98 @@ createRoot(document.getElementById("root")!).render(jsx);
   }
 }
 ```
+
+### 第二階段 commit: VDOM -> DOM
+
+> react-reconciler/src/ReactFiberWorkLoop.ts
+
+```ts
+export function preformConcurrentWorkOnRoot(root: FiberRoot) {
+  // ! 1. render: 構建 fiber 樹(VDOM)
+  renderRootSync(root);
+  // ! 2. commit: VDOM -> DOM
+  // 新的根fiber
+  const finishedWork = root.current.alternate;
+  root.finishedWork = finishedWork;
+  commitRoot(root);
+}
+
+function commitRoot(root: FiberRoot) {
+  // ! 1. commit 階段開始
+  const prevExecutionContext = executionContext;
+  executionContext |= CommitContext;
+  // ! 2. mutation 階段，渲染 DOM 樹
+  commitMutationEffects(root, root.finishedWork);
+
+  // ! 4. commit 結束，把數據還原
+  executionContext = prevExecutionContext;
+  workInProgressRoot = null;
+}
+```
+
+創建完 VDOM 要想辦法渲染在真實的 DOM 上，要逐一遍歷，使用遞迴
+
+> react-reconciler/src/ReactFiberCommitWork.ts
+
+```ts
+// finishedWork 是 HostRoot 類型的 fiber，要把子節點渲染到 root 裡面，root 是 #root
+export function commitMutationEffects(root: FiberRoot, finishedWork: Fiber) {
+  // 遍歷子節點和兄弟節點
+  recursivelyTraverseMutationEffects(root, finishedWork);
+  // 根據flags做相對應的操作，比方在父節點 appendChild
+  commitReconciliationEffects(finishedWork);
+}
+
+// 遍歷 finishedWork
+function recursivelyTraverseMutationEffects(root, parentFiber: Fiber) {
+  // 單鏈表
+  let child = parentFiber.child;
+  while (child !== null) {
+    // 再次遞迴，每個子節點都一一提交，包含同級的兄弟節點
+    commitMutationEffects(root, child);
+    child = child.sibling;
+  }
+}
+// 提交協調中產生的effects，比如flags標記 Placement, Update, ChildDeletion
+function commitReconciliationEffects(finishedWork: Fiber) {
+  // TODO 只先完成 Placement
+  const flags = finishedWork.flags;
+  if (flags & Placement) {
+    // 頁面初次渲染，新增插入 appendChild
+    commitPlacement(finishedWork);
+    // 把 Placement 從 flags 移除
+    finishedWork.flags &= ~Placement;
+  }
+}
+
+function commitPlacement(finishedWork: Fiber) {
+  // 目前先把 HostComponent 渲染上去，之後再處理其他組件的情況
+  if (finishedWork.stateNode && finishedWork.tag === HostComponent) {
+    const domNode = finishedWork.stateNode;
+    const parentFiber = getHostParentFiber(finishedWork);
+    // 要找到最接近的祖先節點 是 Host 的 fiber，再把他塞進去
+    // Host 節點有三種 HostRoot, HostComponent, HostText(不能有子節點)
+    let parentDOM = parentFiber.stateNode;
+    // HostRoot 的實例存在 containerInfo 中
+    if (parentDOM.containerInfo) parentDOM = parentDOM.containerInfo;
+    parentDOM.appendChild(domNode);
+  }
+}
+
+function getHostParentFiber(fiber: Fiber) {
+  let parentFiber = fiber.return;
+  while (parentFiber !== null) {
+    if (isHostParent(parentFiber)) {
+      return parentFiber;
+    }
+    parentFiber = parentFiber.return;
+  }
+  throw Error("Expected to find a host parent.");
+}
+
+function isHostParent(fiber: Fiber) {
+  return fiber.tag === HostComponent || fiber.tag === HostRoot;
+}
+```
+
+看 react 建立的結果，此時最簡單的 jsx 已經出現在畫面上了。

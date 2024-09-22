@@ -4,7 +4,10 @@ import {
   ConcurrentRoot,
   createFiberRoot,
 } from "@mono/react-reconciler/src/ReactFiberRoot";
-import { updateContainer } from "@mono/react-reconciler/src/ReactFiberReconciler";
+import {
+  createContainer,
+  updateContainer,
+} from "@mono/react-reconciler/src/ReactFiberReconciler";
 
 type RootType = {
   render: (children: ReactNodeList) => void;
@@ -26,7 +29,7 @@ ReactDOMRoot.prototype.render = function (children: ReactNodeList) {
 function createRoot(
   container: Element | Document | DocumentFragment
 ): RootType {
-  const root = createFiberRoot(container, ConcurrentRoot);
+  const root = createContainer(container, ConcurrentRoot);
 
   return new ReactDOMRoot(root);
 }
