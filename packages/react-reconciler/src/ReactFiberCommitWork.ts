@@ -1,6 +1,6 @@
 import { Placement } from "./ReactFiberFlags";
-import { Fiber, FiberRoot } from "./ReactInternalTypes";
-import { HostComponent, HostRoot } from "./ReactWorkTags";
+import type { Fiber, FiberRoot } from "./ReactInternalTypes";
+import { HostComponent, HostRoot, HostText } from "./ReactWorkTags";
 
 // finishedWork 是 HostRoot 類型的 fiber，要把子節點渲染到 root 裡面，root 是 #root
 export function commitMutationEffects(root: FiberRoot, finishedWork: Fiber) {
@@ -31,7 +31,10 @@ function commitReconciliationEffects(finishedWork: Fiber) {
 
 function commitPlacement(finishedWork: Fiber) {
   // 目前先把 HostComponent 渲染上去，之後再處理其他組件的情況
-  if (finishedWork.stateNode && finishedWork.tag === HostComponent) {
+  if (
+    finishedWork.stateNode &&
+    (finishedWork.tag === HostComponent || finishedWork.tag === HostText)
+  ) {
     const domNode = finishedWork.stateNode;
     const parentFiber = getHostParentFiber(finishedWork);
     // 要找到最接近的祖先節點 是 Host 的 fiber，再把他塞進去

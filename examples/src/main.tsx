@@ -4,6 +4,8 @@ import { createRoot } from "@mono/react-dom/client";
 const jsx = (
   <div className="border">
     <h1 className="h1Border">react</h1>
+    <h2 className="h2Border">h2</h2>
+    123
   </div>
 );
 {

@@ -402,7 +402,7 @@ export function scheduleTaskForRootDuringMicrotask(root: FiberRoot) {
 }
 ```
 
-### react-reconciler workLoop：第一階段 render
+### react-reconciler workLoop
 
 入口點，執行 reconciler 兩階段
 
@@ -459,7 +459,7 @@ function workLoopSync() {
 }
 ```
 
-### 第一階段 render -> performUnitOfWork()：兩階段 beginWork, completeUnitWork
+#### 第一階段 render -> performUnitOfWork()：兩階段 beginWork, completeUnitWork
 
 1. beginWork
    1. 執行 unitOfWork 的 fiber 創建
@@ -483,7 +483,7 @@ function performUnitOfWork(unitOfWork: Fiber) {
 }
 ```
 
-#### beginWork - 建立 fiber 結構
+##### beginWork - 建立 fiber 結構
 
 > react-reconciler/src/ReactFiberBeginWork.ts
 
@@ -624,7 +624,7 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
 }
 ```
 
-#### completeUnitWork - 深度優先遍歷，按照 fiber tag 建立真實 DOM
+##### completeUnitWork - 深度優先遍歷，按照 fiber tag 建立真實 DOM
 
 > react-reconciler/src/ReactFiberWorkLoop.ts
 
@@ -717,7 +717,7 @@ function appendAllChildren(parent: Element, workInProgress: Fiber) {
 }
 ```
 
-##### 看 fiber 建立的結果
+###### 看 fiber 建立的結果
 
 > 終端下 `pnpm run dev`，此時，如果 examples 專案的 `main.jsx` 的結構是長這樣(目前只有單純寫純標籤節點)
 
@@ -758,7 +758,7 @@ createRoot(document.getElementById("root")!).render(jsx);
 }
 ```
 
-### 第二階段 commit: VDOM -> DOM
+#### 第二階段 commit: VDOM -> DOM
 
 > react-reconciler/src/ReactFiberWorkLoop.ts
 
@@ -852,3 +852,202 @@ function isHostParent(fiber: Fiber) {
 ```
 
 看 react 建立的結果，此時最簡單的 jsx 已經出現在畫面上了。
+
+## 補充各種節點渲染
+
+### 文本節點
+
+有兩種使用方式，可以創造出文本節點
+
+1.
+
+```tsx
+createRoot(document.getElementById("root")!).render("abc123");
+```
+
+2.
+
+```tsx
+const jsx = (
+  <div className="border">
+    <h1 className="h1Border">react</h1>
+    abctest
+  </div>
+);
+
+createRoot(document.getElementById("root")!).render(jsx);
+```
+
+#### 第一種: .render("xxx")
+
+渲染流程，進入 render workLoop `renderRootSync` - `workLoopSync` - `performUnitOfWork` - `beginWork` - `completeUnitWork`
+
+```js
+function performUnitOfWork(unitOfWork: Fiber) {
+  const current = unitOfWork.alternate;
+  // 1. beginWork，返回子節點
+  let next = beginWork(current, unitOfWork);
+
+  // 沒有子節點了
+  if (next === null) {
+    completeUnitWork(unitOfWork);
+  } else {
+    workInProgress = next;
+  }
+}
+```
+
+1. `beginWork`
+
+```js
+export function beginWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  switch (workInProgress.tag) {
+    // 省略
+
+    // 先進入根節點
+    case HostRoot:
+      return updateHostRoot(current, workInProgress);
+    case HostText:
+      return updateHostText();
+  }
+  // 省略
+}
+// beginWork 如果有子節點，會回傳 workInProgress子節點，不然空
+function updateHostText() {
+  return null;
+}
+```
+
+進入 `updateHostRoot` - `reconcileChildren` - `reconcileChildFibers`
+
+```js
+function reconcileChildFibers(
+  returnFiber: Fiber,
+  currentFirstChild: Fiber | null,
+  newChild: any
+) {
+  if (isText(newChild)) {
+    return placeSingleChild(
+      reconcileSingleTextNode(returnFiber, currentFirstChild, newChild)
+    );
+  }
+  // 省略
+
+  return null;
+}
+
+// 只有協調單個子節點，沒有bailout
+function reconcileSingleTextNode(
+  returnFiber: Fiber,
+  currentFirstChild: Fiber | null, // TODO:
+  textContent: string | number
+) {
+  // 把 textContent 作為 pendingProps 放入 fiber
+  // 強制轉型成字串，以防數字
+  const created = createFiberFromText(textContent + "");
+  created.return = returnFiber;
+  return created;
+}
+
+function isText(newChild: any) {
+  return (
+    (typeof newChild === "string" && newChild !== "") ||
+    typeof newChild === "number"
+  );
+}
+```
+
+2. `completeUnitWork` - `completeWork` - `createChildReconciler`
+
+創建真實 DOM
+
+```js
+export function completeWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  const { type, pendingProps } = workInProgress;
+
+  switch (workInProgress.tag) {
+    // 省略
+    // 上面 createFiberFromText 時，textContent 作為 pendingProps 放入 fiber
+    case HostText: {
+      workInProgress.stateNode = document.createTextNode(pendingProps);
+      return null;
+    }
+  }
+  // 省略
+}
+```
+
+再進入 commit 階段 `commitRoot` - `commitMutationEffects`-`commitPlacement`
+
+增加 commit parentDOM.appendChild 的判斷
+
+```js
+function commitPlacement(finishedWork: Fiber) {
+  if (
+    finishedWork.stateNode &&
+    (finishedWork.tag === HostComponent || finishedWork.tag === HostText)
+  ) {
+    // 省略
+  }
+}
+```
+
+就可以得到 文字節點 渲染在畫面上。
+
+#### 第二種: children fibers Array 中有文字節點
+
+渲染流程，進入 render workLoop `renderRootSync` - `workLoopSync` - `performUnitOfWork` - `beginWork` - `updateHostComponent` - `reconcileChildren` - `reconcileChildFibers` - `createChildReconciler`
+
+```js
+export function beginWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  switch (workInProgress.tag) {
+    // 省略
+    // 進入原生標籤
+    case HostComponent:
+      return updateHostComponent(current, workInProgress);
+  }
+  // 省略
+}
+```
+
+```js
+function reconcileChildFibers(
+  returnFiber: Fiber,
+  currentFirstChild: Fiber | null,
+  newChild: any
+) {
+  // 省略
+  // 如果節點是陣列，有多個子節點
+  if (isArray(newChild)) {
+    return reconcileChildrenArray(returnFiber, currentFirstChild, newChild);
+  }
+
+  // 省略
+  return null;
+}
+```
+
+`reconcileChildrenArray` - `createChild`
+
+```js
+function createChild(returnFiber: Fiber, newChild: any) {
+  if (isText(newChild)) {
+    // 強制轉型成字串，以防數字
+    const created = createFiberFromText(newChild + "");
+    created.return = returnFiber;
+    return created;
+  }
+  // 省略
+}
+```
+
+剩下就是走第一種流程，循環 beginWork，commit

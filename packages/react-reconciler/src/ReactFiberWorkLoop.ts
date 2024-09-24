@@ -3,7 +3,7 @@ import { beginWork } from "./ReactFiberBeginWork";
 import { commitMutationEffects } from "./ReactFiberCommitWork";
 import { completeWork } from "./ReactFiberCompleteWork";
 import { ensureRootIsScheduled } from "./ReactFiberRootScheduler";
-import { Fiber, FiberRoot } from "./ReactInternalTypes";
+import type { Fiber, FiberRoot } from "./ReactInternalTypes";
 
 type ExecutionContext = number;
 
@@ -120,11 +120,11 @@ function completeUnitWork(unitOfWork: Fiber) {
   do {
     const current = completedWork.alternate;
     const returnFiber = completedWork.return;
+
     // 依照不同的節點 tag 生成節點，如果是函式組件也可能 還有子節點等等
     // 如果自身處理完成，返回null
     // 並且看有沒有兄弟節點，沒有則返回父節點，再處理父節點的兄弟節點
     let next = completeWork(current, completedWork);
-
     // 如果有下個 work 的話，next可能指向 child 或是 標記 next 是
     if (next !== null) {
       workInProgress = next;
@@ -133,11 +133,12 @@ function completeUnitWork(unitOfWork: Fiber) {
 
     const siblingFiber = completedWork.sibling;
     if (siblingFiber !== null) {
+      // 跳出回圈 回到 workLoopSync 處理下個兄弟節點
       workInProgress = siblingFiber;
       return;
     }
 
-    // 回到父節點上，如果下次循環，發現是已經完成的節點，會走到兄弟節點上
+    // 回到父節點上，處理父節點本身
     completedWork = returnFiber;
     workInProgress = completedWork;
   } while (completedWork !== null);

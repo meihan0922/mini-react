@@ -11,7 +11,7 @@ import {
   IndeterminateComponent,
   WorkTag,
 } from "./ReactWorkTags";
-import { Fiber } from "./ReactInternalTypes";
+import type { Fiber } from "./ReactInternalTypes";
 import { NoFlags } from "./ReactFiberFlags";
 import { Lanes, NoLanes } from "./ReactFiberLane";
 import { RootTag } from "./ReactFiberRoot";
@@ -158,9 +158,9 @@ export function createFiberFromFragment(
 }
 
 // 創造文本節點的 fiber
-export function createFiberFromText(content: string, lanes: Lanes): Fiber {
+export function createFiberFromText(content: string): Fiber {
   const fiber = createFiber(HostText, content, null);
-  fiber.lanes = lanes;
+  // fiber.lanes = lanes;
   return fiber;
 }
 

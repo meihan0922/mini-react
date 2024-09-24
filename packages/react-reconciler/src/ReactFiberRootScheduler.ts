@@ -1,5 +1,5 @@
 import { preformConcurrentWorkOnRoot } from "./ReactFiberWorkLoop";
-import { FiberRoot } from "./ReactInternalTypes";
+import type { FiberRoot } from "./ReactInternalTypes";
 
 import {
   scheduleCallback,
