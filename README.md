@@ -1403,3 +1403,137 @@ function commitPlacement(finishedWork: Fiber) {
   }
 }
 ```
+
+### ClassComponent
+
+```tsx
+class ClassComp extends Component {
+  render() {
+    return <div>123</div>;
+  }
+}
+
+createRoot(document.getElementById("root")!).render(
+  <div>
+    <ClassComp />
+  </div>
+);
+```
+
+在 @mono/react 建立 Component 類別
+
+> react/src/ReactBaseClasses.ts
+
+```ts
+export function Component(props: any) {
+  this.props = props;
+}
+
+Component.prototype.isReactComponent = {};
+```
+
+> react/index.ts
+
+export 出去
+
+```ts
+export { REACT_FRAGMENT_TYPE as Fragment } from "@mono/shared/ReactSymbols";
+export { Component } from "./src/ReactBaseClasses";
+```
+
+轉譯後 class 的 react element 結構
+
+```ts
+{
+  $$typeof: Symbol(react.element),
+  key: null,
+  props: {},
+  ref: null,
+  type: class ClassComp,
+  _owner: null,
+  _store: {validated: true}
+}
+```
+
+#### beginWork
+
+在 beginWork 處理 div 時，會進入 `createChildReconciler` - `reconcileSingleElement` - `createFiberFromElement` - `createFiberFromTypeAndProps` 處理子節點，要創造出 tag 是 ClassComponent 的 Fiber 節點
+
+```ts
+export function createFiberFromTypeAndProps(
+  type: any,
+  key: null | string,
+  pendingProps: any,
+  lanes: Lanes = NoLanes
+): Fiber {
+  // 是組件！
+  let fiberTag: WorkTag = IndeterminateComponent;
+  if (isFn(type)) {
+    // 是 ClassComponent | FunctionComponent
+    if (shouldConstruct(type)) {
+      fiberTag = ClassComponent;
+    } else {
+      fiberTag = FunctionComponent;
+    }
+  }
+  // 省略
+
+  const fiber = createFiber(fiberTag, pendingProps, key);
+  fiber.elementType = type;
+  fiber.type = type;
+  fiber.lanes = lanes;
+
+  return fiber;
+}
+```
+
+處理到 class 本身時，beginWork 要處理 ClassComponent
+
+```ts
+export function beginWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  switch (workInProgress.tag) {
+    // 省略
+    case ClassComponent:
+      return updateClassComponent(current, workInProgress);
+  }
+
+  // TODO:
+  throw new Error(`beginWork 有標籤沒有處理到 - ${workInProgress.tag}`);
+}
+
+function updateClassComponent(current: Fiber | null, workInProgress: Fiber) {
+  const { type, pendingProps } = workInProgress;
+  // 實例在 type 上
+  const instance = new type(pendingProps);
+  // 調用 render 創造節點
+  const children = instance.render();
+  reconcileChildren(current, workInProgress, children);
+  return workInProgress.child;
+}
+```
+
+#### completeWork
+
+```ts
+export function completeWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  const { type, pendingProps } = workInProgress;
+
+  switch (workInProgress.tag) {
+    // 省略
+    case ClassComponent: {
+      // class 是不用創造出實體 DOM 的，因此回傳 null
+      return null;
+    }
+    // 省略
+  }
+  // 省略
+}
+```
+
+處理到這，已經可以成功渲染出節點在畫面上了

@@ -1,6 +1,12 @@
 // import { createRoot } from "react-dom/client";
 import { createRoot } from "@mono/react-dom/client";
-import { Fragment } from "@mono/react";
+import { Fragment, Component } from "@mono/react";
+
+class ClassComp extends Component {
+  render() {
+    return <div>123</div>;
+  }
+}
 
 const jsx = (
   <div className="border">
@@ -34,4 +40,8 @@ const jsx = (
   /* <FragmentComponent /> */
 }
 
-createRoot(document.getElementById("root")!).render(jsx);
+createRoot(document.getElementById("root")!).render(
+  <div>
+    <ClassComp />
+  </div>
+);

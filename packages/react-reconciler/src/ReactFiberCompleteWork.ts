@@ -1,6 +1,12 @@
 import { isNum, isStr } from "@mono/shared/utils";
 import type { Fiber } from "./ReactInternalTypes";
-import { Fragment, HostComponent, HostRoot, HostText } from "./ReactWorkTags";
+import {
+  ClassComponent,
+  Fragment,
+  HostComponent,
+  HostRoot,
+  HostText,
+} from "./ReactWorkTags";
 
 // 針對 workInProgress 創建真實 DOM
 export function completeWork(
@@ -26,6 +32,9 @@ export function completeWork(
     }
     case HostText: {
       workInProgress.stateNode = document.createTextNode(pendingProps);
+      return null;
+    }
+    case ClassComponent: {
       return null;
     }
     // TODO: 其他組件標籤 之後再說
