@@ -1,6 +1,6 @@
 import { mountChildFibers, reconcileChildFibers } from "./ReactChildFiber";
 import type { Fiber } from "./ReactInternalTypes";
-import { HostComponent, HostRoot, HostText } from "./ReactWorkTags";
+import { HostComponent, HostRoot, HostText, Fragment } from "./ReactWorkTags";
 import { shouldSetTextContent } from "@mono/react-dom/client/ReactDOMHostConfig";
 // 處理當前的節點，因應不同節點做不同的處理
 // 返回子節點
@@ -16,9 +16,17 @@ export function beginWork(
       return updateHostComponent(current, workInProgress);
     case HostText:
       return updateHostText();
+    case Fragment:
+      return updateHostFragment(current, workInProgress);
   }
   // TODO:
   throw new Error(`beginWork 有標籤沒有處理到 - ${workInProgress.tag}`);
+}
+
+function updateHostFragment(current: Fiber | null, workInProgress: Fiber) {
+  const nextChildren = workInProgress?.pendingProps.children;
+  reconcileChildren(current, workInProgress, nextChildren);
+  return workInProgress.child;
 }
 
 function updateHostText() {

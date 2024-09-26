@@ -93,7 +93,7 @@ function workLoopSync() {
 }
 
 /**
- * 1. beginWork
+ * 1. beginWork: 執行子節點的 fiber 創建
  *    a. 執行 unitOfWork 的 fiber 創建
  *    b. 看有沒有要走diff，比方類組件 shouldComponentUpdate 比較後走到 bailout,
  *    c. 返回子節點
@@ -104,7 +104,6 @@ function performUnitOfWork(unitOfWork: Fiber) {
   const current = unitOfWork.alternate;
   // 1. beginWork，返回子節點
   let next = beginWork(current, unitOfWork);
-
   // 沒有子節點了
   if (next === null) {
     completeUnitWork(unitOfWork);
@@ -113,7 +112,7 @@ function performUnitOfWork(unitOfWork: Fiber) {
   }
 }
 
-// 深度優先遍歷，子節點、兄弟節點、叔叔節點、爺爺節點....
+// 深度優先遍歷，轉移workInProgress，子節點、兄弟節點、叔叔節點、爺爺節點....
 function completeUnitWork(unitOfWork: Fiber) {
   let completedWork: Fiber | null = unitOfWork;
 

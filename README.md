@@ -1,5 +1,11 @@
 # mini-react
 
+react 中的階段：
+
+- triggering: a render （把客人的點單分發到廚房)
+- rendering: the component beginWork, completeWork (準備訂單)
+- commiting: to the DOM (將菜放在桌上)
+
 ## 創建 Fiber 和 FiberRoot
 
 > @mono/react-reconciler
@@ -461,11 +467,12 @@ function workLoopSync() {
 
 #### 第一階段 render -> performUnitOfWork()：兩階段 beginWork, completeUnitWork
 
-1. beginWork
+1. beginWork: 執行子節點的 fiber 創建
    1. 執行 unitOfWork 的 fiber 創建
    2. 看有沒有要走 diff，比方類組件 shouldComponentUpdate 比較後走到 bailout,
-   3. 返回子節點
-2. complete
+   3. 返回子節點（深度優先，一路執行 child)
+2. 沒有子節點則執行 completeUnitWork: 循環執行創建真實 DOM
+   ，並且把 workInProgress 轉移指針到同層級的兄弟節點，回到 beginWork，直到所有兄弟節點與其子節點都完成，這時指針轉移到父節點上，因為已經執行過 beginWork，不需要跳出 completeUnitWork 的迴圈，執行 DOM 創建之餘，把所有有 stateNode 的子節點（需要略過 Fragment、child === null）全部 appendAllChildren 到父節點 stateNode 中。以上 重複直到根節點。
 
 ```ts
 function performUnitOfWork(unitOfWork: Fiber) {
@@ -1051,3 +1058,348 @@ function createChild(returnFiber: Fiber, newChild: any) {
 ```
 
 剩下就是走第一種流程，循環 beginWork，commit
+
+### Fragment
+
+```tsx
+const jsx = <>11111</>;
+```
+
+會被 babel 轉譯成這樣
+
+```js
+{
+  $$typeof: Symbol(react.element);
+  key: null;
+  props: {
+    children: "11111";
+  }
+  ref: null;
+  type: Symbol(react.fragment);
+}
+```
+
+有三種使用方式，可以創造出 Fragment 節點
+
+1. 巢狀的 Framgment
+
+```tsx
+const jsx = (
+  <div className="border">
+    <h1 className="h1Border">react</h1>
+    <h2 className="h2Border">h2</h2>
+    123
+    <>
+      11111
+      <>
+        <div>333</div>
+      </>
+    </>
+  </div>
+);
+
+createRoot(document.getElementById("root")!).render(jsx);
+```
+
+2. 根節點就是 Fragment
+
+```tsx
+createRoot(document.getElementById("root")!).render(<>123</>);
+```
+
+3. 使用 Fragment 標籤，轉譯過後跟第一種第二種一樣
+
+```tsx
+createRoot(document.getElementById("root")!).render(<Fragment>123</Fragment>);
+```
+
+#### 第一種: 巢狀的 Framgment
+
+一樣流程進入 beginWork 轉換成 fiber，
+root 先 再來 `<div className="border">`，在`updateHostComponent`建立了四個子節點的 fiber（h1-h2-textNode-Fragment)，並且返回 h1 fiber，依次執行，直到 Fragment
+
+```tsx
+<div className="border">
+  <h1 className="h1Border">react</h1>
+  <h2 className="h2Border">h2</h2>
+  123
+  <>
+    11111
+    <>
+      <div>333</div>
+    </>
+  </>
+</div>
+```
+
+```ts
+export function beginWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  switch (workInProgress.tag) {
+    case HostRoot:
+      // 1.root
+      return updateHostRoot(current, workInProgress);
+    case HostComponent:
+      // 2. div
+      // 3. h1 -> completeUnitWork
+      // 4. h2 -> completeUnitWork
+      // 9. div -> completeUnitWork
+      return updateHostComponent(current, workInProgress);
+    case HostText:
+      // 5. 123 -> completeUnitWork  -> 把 workInProgress 指向 Fragment 再次進入 beginWork
+      // 7. 11111 -> completeUnitWork
+      return updateHostText();
+    case Fragment:
+      // 6. Fragment
+      // 8. Fragment
+      return updateHostFragment(current, workInProgress);
+  }
+  // 省略
+}
+```
+
+```ts
+// 和原生標籤 HostComponent 做差不多的處理
+function updateHostComponent(current: Fiber | null, workInProgress: Fiber) {
+  // children 一樣在 pendingProps 上
+  const nextChildren = workInProgress?.pendingProps.children;
+  reconcileChildren(current, workInProgress, nextChildren); //  newChild = [h1,h2,123,Fragment]
+  return workInProgress.child; // h1
+}
+```
+
+```ts
+function reconcileChildFibers(
+  returnFiber: Fiber,
+  currentFirstChild: Fiber | null,
+  newChild: any
+) {
+  // 省略
+  if (isArray(newChild)) {
+    // newChild = [h1,h2,123,Fragment] 都還沒變成 fiber
+    return reconcileChildrenArray(returnFiber, currentFirstChild, newChild);
+  }
+  // 省略
+}
+```
+
+`reconcileChildrenArray` - 遍歷陣列 children `createChild`
+
+```ts
+function createChild(returnFiber: Fiber, newChild: any) {
+  debugger;
+  if (isText(newChild)) {
+    // 強制轉型成字串，以防數字
+    const created = createFiberFromText(newChild + "");
+    created.return = returnFiber;
+    return created;
+  }
+  if (typeof newChild === "object" && newChild !== null) {
+    switch (newChild.$$typeof) {
+      case REACT_ELEMENT_TYPE: {
+        const created = createFiberFromElement(newChild);
+        created.return = returnFiber;
+        return created;
+      }
+    }
+  }
+
+  // TODO
+  return null;
+}
+```
+
+```ts
+// 按照Element 創造出 fiber
+export function createFiberFromElement(element: ReactElement) {
+  const { type, key } = element;
+  const pendingProps = element.props;
+  const fiber = createFiberFromTypeAndProps(type, key, pendingProps);
+  return fiber;
+}
+
+// 按照不同的 type 創造出不同的 fiber
+export function createFiberFromTypeAndProps(
+  type: any,
+  key: null | string,
+  pendingProps: any,
+  lanes: Lanes = NoLanes
+): Fiber {
+  // 是組件！
+  let fiberTag: WorkTag = IndeterminateComponent;
+  if (isFn(type)) {
+    // 省略
+  } else if (isStr(type)) {
+    // 省略
+  } else if (type === REACT_FRAGMENT_TYPE) {
+    fiberTag = Fragment; // 為 Fragment 創造屬於他的tag
+  }
+
+  const fiber = createFiber(fiberTag, pendingProps, key);
+  fiber.elementType = type;
+  fiber.type = type;
+  fiber.lanes = lanes;
+
+  return fiber;
+}
+```
+
+中間經過 completeUnitWork 轉移 workInProgress 指針，依序執行 h1, h2, 123，就不贅述，快轉到處理 Fragment，回到 `beginWork`，進入 `updateHostFragment` 後 - `reconcileChildren` - `reconcileChildFibers`
+
+```ts
+export function beginWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  switch (workInProgress.tag) {
+    // 省略
+    case Fragment:
+      return updateHostFragment(current, workInProgress);
+  }
+  // 省略
+}
+```
+
+```ts
+function updateHostFragment(current: Fiber | null, workInProgress: Fiber) {
+  // children 一樣在 pendingProps 上
+  const nextChildren = workInProgress?.pendingProps.children;
+  reconcileChildren(current, workInProgress, nextChildren); //  newChild = ["11111", {Fragment(還沒變成fiber)}]
+  return workInProgress.child; // '11111'
+}
+```
+
+```ts
+function reconcileChildFibers(
+  returnFiber: Fiber,
+  currentFirstChild: Fiber | null,
+  newChild: any
+) {
+  // 省略
+  if (isArray(newChild)) {
+    // newChild = ["11111", {Fragment(還沒變成fiber)}]
+    return reconcileChildrenArray(returnFiber, currentFirstChild, newChild);
+  }
+  // 省略
+}
+```
+
+`reconcileChildrenArray` - `createChild` 一樣處理成 fiber 後，一樣處理 `newChild = {div 333}`，進入 `completeUnitWork` 完成創建 DOM，回到父節點 Fragment，
+這時在 `completeWork` 中，因為 Fragment 是沒有實際 DOM 的，因此回傳 null
+
+```ts
+// 針對 workInProgress 創建真實 DOM
+export function completeWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  // 省略
+  switch (workInProgress.tag) {
+    case HostRoot:
+    case Fragment: {
+      return null;
+    }
+    // 省略
+  }
+  // 省略
+}
+```
+
+在這之後繼續遞迴直到回到 `div className="border"`，
+
+```ts
+export function completeWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  // 省略
+  switch (workInProgress.tag) {
+    // 省略
+    case HostComponent: {
+      // 1. 創建真實dom
+      const instance = document.createElement(type);
+      // 2. 初始化DOM屬性
+      finalizeInitialChildren(instance, pendingProps);
+      appendAllChildren(instance, workInProgress);
+      workInProgress.stateNode = instance;
+      return null;
+    }
+    // 省略
+  }
+  // 省略
+}
+```
+
+重點放在`appendAllChildren`，要把所有的子節點遞迴，append 到真實 DOM，這個時候，如果子節點除了 `fiber.tag === HostComponent ||
+    fiber.tag === HostRoot ||
+    fiber.tag === HostText` 可以直接添加以外，應該要把 子節點的子節點添加進去，比如 Fragment 下面的節點，把 workInProgress 下面的整顆樹都添加進去。
+
+```ts
+function appendAllChildren(parent: Element, workInProgress: Fiber) {
+  let node = workInProgress.child;
+  while (node !== null) {
+    // 如果子節點是 Fragment，就沒有 node.stateNode
+    if (isHost(node)) {
+      parent.appendChild(node.stateNode); // node.stateNode 是 DOM 節點
+      // 向下找直到小孩是有 stateNode
+    } else if (node.child !== null) {
+      node = node.child;
+      continue;
+    }
+
+    // 已經處理完 workInProgress 下方的整顆樹了
+    if (node === workInProgress) return;
+
+    // 同層級結束
+    while (node.sibling === null) {
+      // 如果是根節點，或是已經是 workInProgress 下方的整顆樹的最後一個節點
+      if (node.return === null || node.return === workInProgress) {
+        return;
+      }
+      node = node.return;
+    }
+    node = node.sibling;
+  }
+}
+
+export function isHost(fiber: Fiber) {
+  return (
+    fiber.tag === HostComponent ||
+    fiber.tag === HostRoot ||
+    fiber.tag === HostText
+  );
+}
+```
+
+最後進入 commit 階段，遍歷 FiberRoot 添加到 parentDOM 中
+
+#### 第二種: 根節點就是 Fragment
+
+在 commit 時，會找根節點 appendChild，要是根節點是 Fragment，會沒有 stateNode
+
+```ts
+function commitPlacement(finishedWork: Fiber) {
+  // 目前先把 HostComponent 渲染上去，之後再處理其他組件的情況
+  if (finishedWork.stateNode && isHost(finishedWork)) {
+    const domNode = finishedWork.stateNode;
+    const parentFiber = getHostParentFiber(finishedWork);
+    // 要找到最接近的祖先節點 是 Host 的 fiber，再把他塞進去
+    // Host 節點有三種 HostRoot, HostComponent, HostText(不能有子節點)
+    let parentDOM = parentFiber.stateNode;
+    // HostRoot 的實例存在 containerInfo 中
+    if (parentDOM.containerInfo) parentDOM = parentDOM.containerInfo;
+    parentDOM.appendChild(domNode);
+  } else {
+    // 要是根節點是 Fragment，會沒有stateNode
+    let child = finishedWork.child;
+    while (child !== null) {
+      // 要是實際的節點
+      commitPlacement(child);
+      // 一樣處理完子樹後處理兄弟節點
+      child = child.sibling;
+    }
+  }
+}
+```

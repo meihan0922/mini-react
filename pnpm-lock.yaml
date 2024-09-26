@@ -70,7 +70,11 @@ importers:
         specifier: ^5.4.1
         version: 5.4.6
 
-  packages/react: {}
+  packages/react:
+    dependencies:
+      '@mono/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/react-dom:
     dependencies:

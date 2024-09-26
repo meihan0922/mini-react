@@ -1,4 +1,7 @@
-import { REACT_ELEMENT_TYPE } from "@mono/shared/ReactSymbols";
+import {
+  REACT_ELEMENT_TYPE,
+  REACT_FRAGMENT_TYPE,
+} from "@mono/shared/ReactSymbols";
 import type { ReactElement } from "@mono/shared/ReactTypes";
 import { createFiberFromElement, createFiberFromText } from "./ReactFiber";
 import { Placement } from "./ReactFiberFlags";
@@ -21,6 +24,7 @@ export const mountChildFibers: ChildReconciler = createChildReconciler(false);
 function createChildReconciler(shouldTrackSideEffect: boolean) {
   // 給 fiber 添加標記，flag
   function placeSingleChild(newFiber: Fiber) {
+    // 給根節點初次渲染添加標記
     if (shouldTrackSideEffect && newFiber.alternate === null) {
       newFiber.flags |= Placement;
     }

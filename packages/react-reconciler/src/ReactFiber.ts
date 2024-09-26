@@ -134,8 +134,9 @@ export function createFiberFromTypeAndProps(
   } else if (isStr(type)) {
     // 如果是原生標籤
     fiberTag = HostComponent;
-  } else if (type === REACT_FRAGMENT_TYPE && lanes) {
-    return createFiberFromFragment(pendingProps.children, lanes, key);
+  } else if (type === REACT_FRAGMENT_TYPE) {
+    fiberTag = Fragment;
+    // return createFiberFromFragment(pendingProps.children, lanes, key);
   }
 
   const fiber = createFiber(fiberTag, pendingProps, key);

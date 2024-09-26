@@ -1,3 +1,4 @@
+import { isHost } from "./ReactFiberCompleteWork";
 import { Placement } from "./ReactFiberFlags";
 import type { Fiber, FiberRoot } from "./ReactInternalTypes";
 import { HostComponent, HostRoot, HostText } from "./ReactWorkTags";
@@ -21,6 +22,7 @@ function recursivelyTraverseMutationEffects(root, parentFiber: Fiber) {
 function commitReconciliationEffects(finishedWork: Fiber) {
   // TODO 只先完成 Placement
   const flags = finishedWork.flags;
+
   if (flags & Placement) {
     // 頁面初次渲染，新增插入 appendChild
     commitPlacement(finishedWork);
@@ -31,10 +33,7 @@ function commitReconciliationEffects(finishedWork: Fiber) {
 
 function commitPlacement(finishedWork: Fiber) {
   // 目前先把 HostComponent 渲染上去，之後再處理其他組件的情況
-  if (
-    finishedWork.stateNode &&
-    (finishedWork.tag === HostComponent || finishedWork.tag === HostText)
-  ) {
+  if (finishedWork.stateNode && isHost(finishedWork)) {
     const domNode = finishedWork.stateNode;
     const parentFiber = getHostParentFiber(finishedWork);
     // 要找到最接近的祖先節點 是 Host 的 fiber，再把他塞進去
@@ -43,6 +42,13 @@ function commitPlacement(finishedWork: Fiber) {
     // HostRoot 的實例存在 containerInfo 中
     if (parentDOM.containerInfo) parentDOM = parentDOM.containerInfo;
     parentDOM.appendChild(domNode);
+  } else {
+    // 要是根節點是 Fragment，會沒有stateNode
+    let child = finishedWork.child;
+    while (child !== null) {
+      commitPlacement(child);
+      child = child.sibling;
+    }
   }
 }
 

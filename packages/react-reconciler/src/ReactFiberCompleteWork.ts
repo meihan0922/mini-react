@@ -1,7 +1,8 @@
 import { isNum, isStr } from "@mono/shared/utils";
 import type { Fiber } from "./ReactInternalTypes";
-import { HostComponent, HostRoot, HostText } from "./ReactWorkTags";
+import { Fragment, HostComponent, HostRoot, HostText } from "./ReactWorkTags";
 
+// 針對 workInProgress 創建真實 DOM
 export function completeWork(
   current: Fiber | null,
   workInProgress: Fiber
@@ -9,7 +10,8 @@ export function completeWork(
   const { type, pendingProps } = workInProgress;
 
   switch (workInProgress.tag) {
-    case HostRoot: {
+    case HostRoot:
+    case Fragment: {
       return null;
     }
     // 原生標籤
@@ -52,7 +54,32 @@ function finalizeInitialChildren(domElement: Element, props: any) {
 function appendAllChildren(parent: Element, workInProgress: Fiber) {
   let node = workInProgress.child;
   while (node !== null) {
-    parent.appendChild(node.stateNode);
+    if (isHost(node)) {
+      // 如果子節點是 Fragment，就沒有 node.stateNode
+      parent.appendChild(node.stateNode); // node.stateNode 是 DOM 節點
+      // 向下找直到小孩是有 stateNode
+    } else if (node.child !== null) {
+      node = node.child;
+      continue;
+    }
+    if (node === workInProgress) return;
+
+    // 同層級結束
+    while (node.sibling === null) {
+      // 如果是根節點，或是已經處理完整個子樹了
+      if (node.return === null || node.return === workInProgress) {
+        return;
+      }
+      node = node.return;
+    }
     node = node.sibling;
   }
+}
+
+export function isHost(fiber: Fiber) {
+  return (
+    fiber.tag === HostComponent ||
+    fiber.tag === HostRoot ||
+    fiber.tag === HostText
+  );
 }
