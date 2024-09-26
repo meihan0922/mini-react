@@ -6,6 +6,7 @@ import {
   HostText,
   Fragment,
   ClassComponent,
+  FunctionComponent,
 } from "./ReactWorkTags";
 import { shouldSetTextContent } from "@mono/react-dom/client/ReactDOMHostConfig";
 // 處理當前的節點，因應不同節點做不同的處理
@@ -26,6 +27,8 @@ export function beginWork(
       return updateHostFragment(current, workInProgress);
     case ClassComponent:
       return updateClassComponent(current, workInProgress);
+    case FunctionComponent:
+      return updateFunctionComponent(current, workInProgress);
   }
   // TODO:
   throw new Error(`beginWork 有標籤沒有處理到 - ${workInProgress.tag}`);
@@ -37,6 +40,14 @@ function updateClassComponent(current: Fiber | null, workInProgress: Fiber) {
   const instance = new type(pendingProps);
   // 調用 render 創造節點
   const children = instance.render();
+  reconcileChildren(current, workInProgress, children);
+  return workInProgress.child;
+}
+
+function updateFunctionComponent(current: Fiber | null, workInProgress: Fiber) {
+  const { type, pendingProps } = workInProgress;
+  // 調用 render 創造節點
+  const children = type(pendingProps);
   reconcileChildren(current, workInProgress, children);
   return workInProgress.child;
 }

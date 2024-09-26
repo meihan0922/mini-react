@@ -2,10 +2,8 @@
 import { createRoot } from "@mono/react-dom/client";
 import { Fragment, Component } from "@mono/react";
 
-class ClassComp extends Component {
-  render() {
-    return <div>123</div>;
-  }
+function Comp({ name }: { name: string }) {
+  return <div>12123123:{name}</div>;
 }
 
 const jsx = (
@@ -42,6 +40,6 @@ const jsx = (
 
 createRoot(document.getElementById("root")!).render(
   <div>
-    <ClassComp />
+    <Comp name="mmmmm" />
   </div>
 );

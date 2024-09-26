@@ -3,6 +3,7 @@ import type { Fiber } from "./ReactInternalTypes";
 import {
   ClassComponent,
   Fragment,
+  FunctionComponent,
   HostComponent,
   HostRoot,
   HostText,
@@ -17,7 +18,9 @@ export function completeWork(
 
   switch (workInProgress.tag) {
     case HostRoot:
-    case Fragment: {
+    case Fragment:
+    case ClassComponent:
+    case FunctionComponent: {
       return null;
     }
     // 原生標籤
@@ -32,9 +35,6 @@ export function completeWork(
     }
     case HostText: {
       workInProgress.stateNode = document.createTextNode(pendingProps);
-      return null;
-    }
-    case ClassComponent: {
       return null;
     }
     // TODO: 其他組件標籤 之後再說

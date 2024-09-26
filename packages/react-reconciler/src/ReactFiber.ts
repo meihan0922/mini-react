@@ -126,7 +126,7 @@ export function createFiberFromTypeAndProps(
   let fiberTag: WorkTag = IndeterminateComponent;
   if (isFn(type)) {
     // 是 ClassComponent | FunctionComponent
-    if (shouldConstruct(type)) {
+    if (type.prototype.isReactComponent) {
       fiberTag = ClassComponent;
     } else {
       fiberTag = FunctionComponent;

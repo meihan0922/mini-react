@@ -1469,11 +1469,9 @@ export function createFiberFromTypeAndProps(
   // 是組件！
   let fiberTag: WorkTag = IndeterminateComponent;
   if (isFn(type)) {
-    // 是 ClassComponent | FunctionComponent
-    if (shouldConstruct(type)) {
+    // 是 ClassComponent
+    if (type.prototype.isReactComponent) {
       fiberTag = ClassComponent;
-    } else {
-      fiberTag = FunctionComponent;
     }
   }
   // 省略
@@ -1528,6 +1526,104 @@ export function completeWork(
     // 省略
     case ClassComponent: {
       // class 是不用創造出實體 DOM 的，因此回傳 null
+      return null;
+    }
+    // 省略
+  }
+  // 省略
+}
+```
+
+處理到這，已經可以成功渲染出節點在畫面上了
+
+### FunctionComponent
+
+```tsx
+function Comp() {
+  return <div>123</div>;
+}
+createRoot(document.getElementById("root")!).render(
+  <div>
+    <Comp />
+  </div>
+);
+```
+
+轉譯後 class 的 react element 結構
+
+```ts
+{
+  $$typeof: Symbol(react.element),
+  key: null,
+  props: {},
+  ref: null,
+  type: ƒ Comp(),
+  _owner: null,
+  _store: {validated: true}
+}
+```
+
+#### beginWork
+
+在 beginWork 處理 div 時，會進入 `createChildReconciler` - `reconcileSingleElement` - `createFiberFromElement` - `createFiberFromTypeAndProps` 處理子節點，要創造出 tag 是 ClassComponent 的 Fiber 節點
+
+```ts
+export function createFiberFromTypeAndProps(
+  type: any,
+  key: null | string,
+  pendingProps: any,
+  lanes: Lanes = NoLanes
+): Fiber {
+  // 是組件！
+  let fiberTag: WorkTag = IndeterminateComponent;
+  if (isFn(type)) {
+    // 是 ClassComponent | FunctionComponent
+    if (type.prototype.isReactComponent) {
+      fiberTag = ClassComponent;
+    } else {
+      fiberTag = FunctionComponent;
+    }
+  }
+  // 省略
+}
+```
+
+處理到 FN 本身時，beginWork 要處理 FunctionComponent
+
+```ts
+export function beginWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  switch (workInProgress.tag) {
+    // 省略
+    case FunctionComponent:
+      return updateFunctionComponent(current, workInProgress);
+  }
+  // 省略
+}
+
+function updateFunctionComponent(current: Fiber | null, workInProgress: Fiber) {
+  const { type, pendingProps } = workInProgress;
+  // 調用 render 創造節點
+  const children = type(pendingProps);
+  reconcileChildren(current, workInProgress, children);
+  return workInProgress.child;
+}
+```
+
+#### completeWork
+
+```ts
+export function completeWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  const { type, pendingProps } = workInProgress;
+
+  switch (workInProgress.tag) {
+    // 省略
+    case FunctionComponent: {
       return null;
     }
     // 省略
