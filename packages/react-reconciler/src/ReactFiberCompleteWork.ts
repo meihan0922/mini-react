@@ -36,8 +36,8 @@ export function completeWork(
         finalizeInitialChildren(instance, null, pendingProps);
         appendAllChildren(instance, workInProgress);
         workInProgress.stateNode = instance;
-        return null;
       }
+      return null;
     }
     case HostText: {
       workInProgress.stateNode = document.createTextNode(pendingProps);

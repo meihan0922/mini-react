@@ -3,24 +3,24 @@ import { createRoot } from "@mono/react-dom/client";
 import { Fragment, Component, useReducer } from "@mono/react";
 
 function Comp() {
-  const [count, setC] = useReducer((x) => {
-    return x + 1;
-  }, 0);
+  const [count, setC] = useReducer((x) => x + 1, 0);
 
   return (
-    <button
-      onClick={() => {
-        console.log("??????click");
-        setC();
-      }}
-    >
-      {count}
-    </button>
+    <div>
+      {count % 2 === 0 ? (
+        <button
+          onClick={() => {
+            console.log("??????click");
+            setC();
+          }}
+        >
+          {count}
+        </button>
+      ) : (
+        <span>1234</span>
+      )}
+    </div>
   );
 }
 
-createRoot(document.getElementById("root")!).render(
-  <div>
-    <Comp name="mmmmm" />
-  </div>
-);
+createRoot(document.getElementById("root")!).render((<Comp />) as any);

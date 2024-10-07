@@ -327,7 +327,7 @@ function workLoop(initialTime: number): boolean {
     } else {
       pop(taskQueue);
     }
-    console.log("taskQueue", taskQueue);
+
     currentTask = peek(taskQueue);
   }
 

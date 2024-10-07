@@ -33,6 +33,7 @@
         - [建立 hook 鏈表](#建立-hook-鏈表)
         - [dispatch 事件，修改 hook.memorizedState](#dispatch-事件修改-hookmemorizedstate)
         - [render 階段](#render-階段)
+        - [節點刪除](#節點刪除)
 
 # mini-react
 
@@ -2263,3 +2264,165 @@ function updateHostRoot(current: Fiber | null, workInProgress: Fiber) {
 1. hook 存在 fiber 上的 memoizedState
 2. 他是鏈表
 3. 為什麼 useReducer 會觸發更新？因為會去呼叫 `schedulerUpdateOnFiber`
+
+##### 節點刪除
+
+刪除子節點，紀錄在父節點 fiber 結構的 `deletions`，比起在子節點上一一掛在 flags 上要高效，到 commit 階段直接遍歷刪除
+
+```ts
+deletions: Array<Fiber> | null;
+```
+
+改下 `main.tsx`
+
+```tsx
+// import { createRoot } from "react-dom/client";
+import { createRoot } from "@mono/react-dom/client";
+import { Fragment, Component, useReducer } from "@mono/react";
+
+function Comp() {
+  const [count, setC] = useReducer((x) => x + 1, 0);
+
+  return (
+    <div>
+      {count % 2 === 0 ? (
+        <button
+          onClick={() => {
+            console.log("??????click");
+            setC();
+          }}
+        >
+          {count}
+        </button>
+      ) : (
+        <span>1234</span>
+      )}
+    </div>
+  );
+}
+
+createRoot(document.getElementById("root")!).render((<Comp />) as any);
+```
+
+要做到刪除分為兩部分：
+
+1. 在協調 reconciler 中父節點要紀錄子節點的刪除 deletions，並更新 flags
+2. 在 commit 階段，根據 fiber 更新 DOM，刪除節點，其中要注意易找到原生的祖先節點再刪除
+
+目前只有協調單個子節點 - `reconcileSingleElement`
+
+> react-reconciler/src/ReactChildFiber.ts
+
+```ts
+// 只有協調單個子節點
+function reconcileSingleElement(
+  returnFiber: Fiber,
+  currentFirstChild: Fiber | null,
+  element: ReactElement
+) {
+  // 節點復用的條件需滿足
+  // 1. 同一層級下
+  // 2. key 相同
+  // 3. type 相同
+  const key = element.key;
+  let child = currentFirstChild;
+  while (child !== null) {
+    if (child.key === key) {
+      const elementType = element.type;
+      if (child.elementType === elementType) {
+        // 復用
+        const existing = useFiber(child, element.props);
+        existing.return = returnFiber;
+        return existing;
+      } else {
+        // ! 同層級下 key 不應相同，沒一個可以復用，要刪除所有的剩下的child(之前的已經走到下面的 deleteChild)
+        deleteRemaingChildren(returnFiber, child);
+        break;
+      }
+    } else {
+      // ! delete 因為是單個節點才會進來這裡
+      deleteChild(returnFiber, child);
+    }
+    child = child.sibling;
+  }
+  const createFiber = createFiberFromElement(element);
+  createFiber.return = returnFiber;
+  return createFiber;
+}
+
+function deleteChild(returnFiber: Fiber, childToDelete: Fiber) {
+  const deletions = returnFiber.deletions;
+  if (!shouldTrackSideEffect) {
+    // 初次渲染
+    return;
+  }
+  if (!deletions) {
+    returnFiber.deletions = [childToDelete];
+    returnFiber.flags |= ChildDeletion;
+  } else {
+    returnFiber.deletions!.push(childToDelete);
+  }
+}
+
+function deleteRemaingChildren(returnFiber: Fiber, currentFirstChild: Fiber) {
+  if (!shouldTrackSideEffect) {
+    // 初次渲染
+    return;
+  }
+  let childToDelete: Fiber | null = currentFirstChild;
+  while (childToDelete !== null) {
+    deleteChild(returnFiber, childToDelete);
+    childToDelete = childToDelete.sibling;
+  }
+  return null;
+}
+```
+
+> react-reconciler/src/ReactFiberCommitWork.ts
+
+```ts
+// 提交協調中產生的effects，比如flags標記 Placement, Update, ChildDeletion
+function commitReconciliationEffects(finishedWork: Fiber) {
+  // TODO 只先完成 Placement ChildDeletion
+  const flags = finishedWork.flags;
+
+  if (flags & Placement) {
+    // 省略
+  } else if (flags & ChildDeletion) {
+    // 找到 原生的祖先節點（網上找，直到找到為止
+    const parentFiber = isHostParent(finishedWork)
+      ? finishedWork
+      : getHostParentFiber(finishedWork);
+    const parentDOM = parentFiber.stateNode;
+
+    commitDeletions(finishedWork.deletions, parentDOM);
+
+    // 把 ChildDeletion 從 flags 移除
+    finishedWork.flags &= ~ChildDeletion;
+    finishedWork.deletions = null;
+  }
+}
+
+function getStateNode(deletion: Fiber) {
+  let node: Fiber = deletion;
+  // 一直找到是Host類型的node為止，不是的話略過
+  while (true) {
+    if (isHost(node) && node.stateNode) {
+      return node.stateNode;
+    }
+    node = node.child as Fiber;
+  }
+}
+
+// 根據fiber 刪除 DOM 節點（包含父子
+function commitDeletions(
+  deletions: Fiber["deletions"],
+  parentFiberDOM: Element | Document | DocumentFragment
+) {
+  deletions?.forEach((deletion) => {
+    parentFiberDOM.removeChild(getStateNode(deletion));
+  });
+}
+```
+
+這個時候就可以實現刪除節點了！

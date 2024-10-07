@@ -8,7 +8,7 @@ import {
   createFiberFromText,
   createWorkInProgress,
 } from "./ReactFiber";
-import { Placement } from "./ReactFiberFlags";
+import { ChildDeletion, Placement } from "./ReactFiberFlags";
 import type { Fiber } from "./ReactInternalTypes";
 import { isArray, isStr } from "@mono/shared/utils";
 
@@ -24,8 +24,33 @@ export const reconcileChildFibers: ChildReconciler =
 
 export const mountChildFibers: ChildReconciler = createChildReconciler(false);
 
-// 協調子節點
+// 協調子節點，shouldTrackSideEffect：不是初次渲染
 function createChildReconciler(shouldTrackSideEffect: boolean) {
+  function deleteRemaingChildren(returnFiber: Fiber, currentFirstChild: Fiber) {
+    if (!shouldTrackSideEffect) {
+      // 初次渲染
+      return;
+    }
+    let childToDelete: Fiber | null = currentFirstChild;
+    while (childToDelete !== null) {
+      deleteChild(returnFiber, childToDelete);
+      childToDelete = childToDelete.sibling;
+    }
+    return null;
+  }
+  function deleteChild(returnFiber: Fiber, childToDelete: Fiber) {
+    const deletions = returnFiber.deletions;
+    if (!shouldTrackSideEffect) {
+      // 初次渲染
+      return;
+    }
+    if (!deletions) {
+      returnFiber.deletions = [childToDelete];
+      returnFiber.flags |= ChildDeletion;
+    } else {
+      returnFiber.deletions!.push(childToDelete);
+    }
+  }
   // 給 fiber 添加標記，flag
   function placeSingleChild(newFiber: Fiber) {
     // 給根節點初次渲染添加標記
@@ -63,11 +88,13 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
           existing.return = returnFiber;
           return existing;
         } else {
-          // 同層級下 key 不應相同
+          // 同層級下 key 不應相同，沒一個可以復用，要刪除所有的剩下的child(之前的已經走到下面的 deleteChild)
+          deleteRemaingChildren(returnFiber, child);
           break;
         }
       } else {
-        // TODO: delete 因為是單個節點才會進來這裡
+        // delete 因為是單個節點才會進來這裡
+        deleteChild(returnFiber, child);
       }
       child = child.sibling;
     }

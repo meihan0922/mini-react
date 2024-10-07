@@ -49,6 +49,7 @@ export type Fiber = {
   // Effect
   flags: Flags;
   subtreeFlags: Flags;
+  // 紀錄要刪除的子節點，在父節點上紀錄，比起在子節點上一一掛在flags上要高效，到commit階段直接遍歷刪除
   deletions: Array<Fiber> | null;
 
   // Singly linked list fast path to the next fiber with side-effects.
@@ -60,6 +61,7 @@ export type Fiber = {
   // This is a pooled version of a Fiber. Every fiber that gets updated will
   // eventually have a pair. There are cases when we can clean up pairs to save
   // memory if we need to.
+  // 緩存的 fiber
   alternate: Fiber | null;
 };
 
