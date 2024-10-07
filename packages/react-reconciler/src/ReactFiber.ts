@@ -62,7 +62,7 @@ function FiberNode(tag: WorkTag, pendingProps: unknown, key: string | null) {
 export function createWorkInProgress(current: Fiber, pendingProps: any): Fiber {
   let workInProgress = current.alternate;
 
-  // 初始化只有一棵樹的時候 創造 WorkInProgress 樹
+  // 初始化只有一棵樹的時候，或是要復用節點時，創造 WorkInProgress 樹
   if (workInProgress === null) {
     workInProgress = createFiber(current.tag, pendingProps, current.key);
     workInProgress.elementType = current.elementType;

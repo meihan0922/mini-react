@@ -3,7 +3,11 @@ import {
   REACT_FRAGMENT_TYPE,
 } from "@mono/shared/ReactSymbols";
 import type { ReactElement } from "@mono/shared/ReactTypes";
-import { createFiberFromElement, createFiberFromText } from "./ReactFiber";
+import {
+  createFiberFromElement,
+  createFiberFromText,
+  createWorkInProgress,
+} from "./ReactFiber";
 import { Placement } from "./ReactFiberFlags";
 import type { Fiber } from "./ReactInternalTypes";
 import { isArray, isStr } from "@mono/shared/utils";
@@ -31,13 +35,43 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
     return newFiber;
   }
 
-  // 只有協調單個子節點，沒有bailout
+  function useFiber(fiber: Fiber, pendingProps: any) {
+    const clone = createWorkInProgress(fiber, pendingProps);
+    clone.index = 0;
+    clone.sibling = null;
+    return clone;
+  }
+
+  // 只有協調單個子節點
   function reconcileSingleElement(
     returnFiber: Fiber,
     currentFirstChild: Fiber | null,
-    newChild: ReactElement
+    element: ReactElement
   ) {
-    const createFiber = createFiberFromElement(newChild);
+    // 節點復用的條件需滿足
+    // 1. 同一層級下
+    // 2. key 相同
+    // 3. type 相同
+    const key = element.key;
+    let child = currentFirstChild;
+    while (child !== null) {
+      if (child.key === key) {
+        const elementType = element.type;
+        if (child.elementType === elementType) {
+          // 復用
+          const existing = useFiber(child, element.props);
+          existing.return = returnFiber;
+          return existing;
+        } else {
+          // 同層級下 key 不應相同
+          break;
+        }
+      } else {
+        // TODO: delete 因為是單個節點才會進來這裡
+      }
+      child = child.sibling;
+    }
+    const createFiber = createFiberFromElement(element);
     createFiber.return = returnFiber;
     return createFiber;
   }

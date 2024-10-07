@@ -72,6 +72,9 @@ importers:
 
   packages/react:
     dependencies:
+      '@mono/react-reconciler':
+        specifier: workspace:*
+        version: link:../react-reconciler
       '@mono/shared':
         specifier: workspace:*
         version: link:../shared

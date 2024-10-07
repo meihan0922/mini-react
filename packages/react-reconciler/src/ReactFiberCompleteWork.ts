@@ -25,13 +25,19 @@ export function completeWork(
     }
     // 原生標籤
     case HostComponent: {
-      // 1. 創建真實dom
-      const instance = document.createElement(type);
-      // 2. 初始化DOM屬性
-      finalizeInitialChildren(instance, pendingProps);
-      appendAllChildren(instance, workInProgress);
-      workInProgress.stateNode = instance;
-      return null;
+      // 這邊也要進行復用條件判斷<如果已經有實例了，不需要再次創建
+      if (current !== null && workInProgress.stateNode !== null) {
+        updateHostComponent(current, workInProgress, type, pendingProps);
+      } else {
+        // 1. 創建真實dom
+        const instance = document.createElement(type);
+
+        // 2. 初始化DOM屬性
+        finalizeInitialChildren(instance, null, pendingProps);
+        appendAllChildren(instance, workInProgress);
+        workInProgress.stateNode = instance;
+        return null;
+      }
     }
     case HostText: {
       workInProgress.stateNode = document.createTextNode(pendingProps);
@@ -41,21 +47,72 @@ export function completeWork(
   }
   throw new Error("不知名的 work tag");
 }
-// 初始化屬性
-function finalizeInitialChildren(domElement: Element, props: any) {
-  for (const propKey in props) {
-    const nextVal = props[propKey];
+
+function updateHostComponent(
+  current: Fiber | null,
+  workInProgress: Fiber,
+  type: string,
+  newProps: any
+) {
+  if (current?.memoizedProps === newProps) {
+    return;
+  } else {
+    // 比較和更新屬性
+    finalizeInitialChildren(
+      workInProgress.stateNode,
+      current?.memoizedProps,
+      newProps
+    );
+  }
+}
+// 初始化屬性 || 更新屬性，prevProps和nextProps的dom指向一樣的
+function finalizeInitialChildren(
+  domElement: Element,
+  prevProps: any,
+  nextProps: any
+) {
+  for (const propKey in prevProps) {
+    const prevProp = prevProps[propKey];
     if (propKey === "style") {
       // TODO:
     } else if (propKey === "children") {
       // TODO:
 
       // 是文本節點
-      if (isStr(nextVal) || isNum(nextVal)) {
-        domElement.textContent = `${nextVal}`;
+      if (isStr(prevProp) || isNum(prevProp)) {
+        domElement.textContent = "";
       }
     } else {
-      domElement[propKey] = nextVal;
+      // 處理事件
+      if (propKey === "onClick") {
+        // 移除舊的click事件
+        domElement.removeEventListener("click", prevProp);
+      } else {
+        // 如果新的props沒有，把他設置成空
+        if (!(prevProp in nextProps)) {
+          domElement[propKey] = "";
+        }
+      }
+    }
+  }
+  for (const propKey in nextProps) {
+    const nextProp = nextProps[propKey];
+    if (propKey === "style") {
+      // TODO:
+    } else if (propKey === "children") {
+      // TODO:
+
+      // 是文本節點
+      if (isStr(nextProp) || isNum(nextProp)) {
+        domElement.textContent = `${nextProp}`;
+      }
+    } else {
+      // 處理事件
+      if (propKey === "onClick") {
+        domElement.addEventListener("click", nextProp);
+      } else {
+        domElement[propKey] = nextProp;
+      }
     }
   }
 }

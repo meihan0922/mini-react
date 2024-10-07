@@ -1,3 +1,39 @@
+- [mini-react](#mini-react)
+  - [創建 Fiber 和 FiberRoot](#創建-fiber-和-fiberroot)
+    - [1. 生成 fiber](#1-生成-fiber)
+    - [2. 生成 FiberRoot](#2-生成-fiberroot)
+  - [實現入口 createRoot](#實現入口-createroot)
+    - [1. 建立 ReactDOMRoot，讓外部調用 createRoot 和 render()](#1-建立-reactdomroot讓外部調用-createroot-和-render)
+    - [2. 調用 render，根組件交給 react，react 內部調用 updateContainer，創建 update，啟動調度](#2-調用-render根組件交給-reactreact-內部調用-updatecontainer創建-update啟動調度)
+  - [scheduleUpdateOnFiber 調度更新開始](#scheduleupdateonfiber-調度更新開始)
+    - [ensureRootIsScheduled -\> scheduleTaskForRootDuringMicrotask，確保在當次瀏覽器工作循環執行啟動 scheduler 包中的調度](#ensurerootisscheduled---scheduletaskforrootduringmicrotask確保在當次瀏覽器工作循環執行啟動-scheduler-包中的調度)
+    - [react-reconciler workLoop](#react-reconciler-workloop)
+      - [第一階段 render -\> performUnitOfWork()：兩階段 beginWork, completeUnitWork](#第一階段-render---performunitofwork兩階段-beginwork-completeunitwork)
+        - [beginWork - 建立 fiber 結構](#beginwork---建立-fiber-結構)
+        - [completeUnitWork - 深度優先遍歷，按照 fiber tag 建立真實 DOM](#completeunitwork---深度優先遍歷按照-fiber-tag-建立真實-dom)
+          - [看 fiber 建立的結果](#看-fiber-建立的結果)
+      - [第二階段 commit: VDOM -\> DOM](#第二階段-commit-vdom---dom)
+  - [補充各種節點渲染](#補充各種節點渲染)
+    - [文本節點](#文本節點)
+      - [第一種: .render("xxx")](#第一種-renderxxx)
+      - [第二種: children fibers Array 中有文字節點](#第二種-children-fibers-array-中有文字節點)
+    - [Fragment](#fragment)
+      - [第一種: 巢狀的 Framgment](#第一種-巢狀的-framgment)
+      - [第二種: 根節點就是 Fragment](#第二種-根節點就是-fragment)
+    - [ClassComponent](#classcomponent)
+      - [beginWork](#beginwork)
+      - [completeWork](#completework)
+    - [FunctionComponent](#functioncomponent)
+      - [beginWork](#beginwork-1)
+      - [completeWork](#completework-1)
+  - [Hooks](#hooks)
+    - [模擬 useReducer](#模擬-usereducer)
+      - [定義 useReducer](#定義-usereducer)
+        - [架構](#架構)
+        - [建立 hook 鏈表](#建立-hook-鏈表)
+        - [dispatch 事件，修改 hook.memorizedState](#dispatch-事件修改-hookmemorizedstate)
+        - [render 階段](#render-階段)
+
 # mini-react
 
 react 中的階段：
@@ -1633,3 +1669,597 @@ export function completeWork(
 ```
 
 處理到這，已經可以成功渲染出節點在畫面上了
+
+## Hooks
+
+- 規則：官網說不能在循換、條件或是嵌套中調用，要確保在 react 函式最頂層以及任何 return 前調用他們。
+  - 是為什麼呢？ 因為在 hook 存在在 `fiber.memorized` 中，*單鏈表*的每個 hook 節點是沒有名字或是 key 的，除了他們的順序，_無法記錄他們的唯一性_，為了保持穩定性，才有這些規則。
+- 類型：
+
+  ```ts
+  export type Hook = {
+    // 不同類型的 hook，取值也不同
+    // useState / useReducer 存 state，
+    // useEffect / useLayoutEffect 存 effect單向循環鏈表
+    memorizedState: any;
+
+    // 下一個 hook，如果是 null，表示他是最後一個 hook
+    next: Hook | null;
+
+    // 下面三個先不深入，之後再說
+    baseState: any;
+    baseQueue: Update<any, any> | null;
+    queue: any;
+  };
+  ```
+
+- 存儲：
+  就像是 fiber，會有一個指針指向正在工作中的 hook - `workInProgressHook`
+  fiber.memorizedState(hook0) --next--> next(hook1) --next--> .... -> next(hookN)
+
+  ```tsx
+  let workInProgressHook = null;
+
+  function FnComp(){
+    const [state0, setState0] = useState(0); // hook0
+    const [state1, setState1] = useState(0); // hook1
+    useEffect(()=>{},[]) // hook2
+    ...
+  }
+  ```
+
+  ### 模擬 useReducer
+
+  ```tsx
+  function Comp() {
+    const [count, setC] = useReducer((x) => {
+      return x + 1;
+    }, 0);
+
+    // 僅先處理一個子節點喔
+    return (
+      <button
+        onClick={() => {
+          console.log("??????click");
+          setC();
+        }}
+      >
+        {count}
+      </button>
+    );
+  }
+  ```
+
+  > react-reconciler/src/ReactFiberCompleteWork.ts
+
+```ts
+// 初始化屬性 || 更新屬性
+function finalizeInitialChildren(domElement: Element, props: any) {
+  for (const propKey in props) {
+    const nextProp = props[propKey];
+    if (propKey === "style") {
+      // 省略
+    } else if (propKey === "children") {
+      // 省略
+    } else {
+      // ! 處理事件，源碼是用合成事件做處理，暫時用原生的
+      if (propKey === "onClick") {
+        domElement.addEventListener("click", nextProp);
+      } else {
+        domElement[propKey] = nextProp;
+      }
+    }
+  }
+}
+```
+
+此時已經可以看到`console.log("??????click");`
+
+#### 定義 useReducer
+
+##### 架構
+
+> react-reconciler/src/ReactFiberHooks.ts
+
+```ts
+type Hook = {
+  memorizedState: any;
+  next: null | Hook;
+};
+
+export function useReducer<S, I, A>(
+  reducer: (state: S, action: A) => S,
+  initialArg: I,
+  init?: (initialArg: I) => S
+) {
+  // TODO: 構建Hook鏈表
+  const hook: Hook = {
+    memorizedState: null,
+    next: null,
+  };
+  let initialState: S;
+  if (init) {
+    initialState = init(initialArg);
+  } else {
+    initialState = initialArg as any;
+  }
+
+  // TODO: dispatch 事件
+  const dispatch = (action: A) => {
+    const newVal = reducer(initialArg, action);
+  };
+
+  // TODO: 要區分初次掛載還是更新，暫時寫這樣
+  hook.memorizedState = initialArg;
+
+  return [initialArg, dispatch];
+}
+```
+
+> react/index.ts
+
+```ts
+export { useReducer } from "@mono/react-reconciler/src/ReactFiberHooks";
+```
+
+此時頁面並不會更新，要想更新一定要調用 `schedulerUpdateOnFiber`
+
+在處理這個之前，先要想辦法把 hook 和 fiber 關聯起來。
+說到 fiber 就會提到 beginWork，是把節點轉換成 fiber 的過程。
+中間應該是可以做到把 hook 掛載上去的！
+
+> react-reconciler/src/ReactFiberBeginWork.ts
+
+```ts
+export function beginWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  switch (workInProgress.tag) {
+    // 省略
+    case FunctionComponent:
+      return updateFunctionComponent(current, workInProgress);
+  }
+  // 省略
+}
+
+function updateFunctionComponent(current: Fiber | null, workInProgress: Fiber) {
+  const { type, pendingProps } = workInProgress;
+  // 調用 render 創造節點
+  // 原先是調用 type(pendingProps);
+  const children = renderWithHook(current, workInProgress, type, pendingProps);
+  reconcileChildren(current, workInProgress, children);
+  return workInProgress.child;
+}
+```
+
+中間插入 `renderWithHook` 讓 fiber 上面的 `memoizedState` 初始化，並且針對 hook 也設定三個變數，（不共用，會全局污染，workInProgressFiber 隨時會變動）
+
+- `currentlyRenderingFiber`: 記載現在進行中的 fiber
+- `workInProgressHook`: 指針指向當前進行中新的 hook
+- `currentHook`: 舊的 hook
+
+> react-reconciler/src/ReactFiberHooks.ts
+
+```ts
+let currentlyRenderingFiber: Fiber | null = null;
+let workInProgressHook: Hook | null = null;
+let currentHook: Hook | null = null;
+
+export function renderWithHook(
+  current: Fiber | null,
+  workInProgress: Fiber,
+  component: any,
+  props: any
+) {
+  currentlyRenderingFiber = workInProgress;
+  // 初始化
+  workInProgress.memoizedState = null;
+  let children = component(props);
+
+  finishRenderingHooks();
+  return children;
+}
+
+// reset: 處理完後，要把指針都重置
+export function finishRenderingHooks() {
+  currentlyRenderingFiber = null;
+  currentHook = null;
+  workInProgressHook = null;
+}
+```
+
+##### 建立 hook 鏈表
+
+回到 `useReducer`，在一開始 mount 呼叫時，需要構建出 hook 鏈表掛載在 fiber 身上。創造 `updateWorkInProgressHook`，目的是 返回新建立的 Hook 並且構建 hook 鏈表。
+注意，在 mount 和 update 階段針對 hook 的處理會不一樣，
+如果是 mount 的階段，需要構建鏈表，更新階段只需要更新鏈表。再針對是不是 hook0 做判斷。
+
+> react-reconciler/src/ReactFiberHooks.ts
+
+```ts
+type Hook = {
+  memorizedState: any;
+  next: null | Hook;
+};
+
+// 返回新建立的 Hook 並且構建 hook鏈表
+function updateWorkInProgressHook(): Hook {
+  let hook: Hook;
+
+  // 指向到節點舊的fiber
+  const current = currentlyRenderingFiber?.alternate;
+
+  if (current) {
+    // update 階段
+    // 把老的state掛載到新的fiber的memoizedState上
+    currentlyRenderingFiber!.memoizedState = current.memoizedState;
+    if (workInProgressHook) {
+      // 不是 hook0
+      // 把當前新的hook掛載到鏈表上，並更新當前的hook
+      workInProgressHook = hook = workInProgressHook.next!;
+      currentHook = ㄆ?.next as Hook;
+    } else {
+      // 第一個hook
+      workInProgressHook = hook = currentlyRenderingFiber?.memoizedState;
+      // 把老的hook倒給 currentHook
+      currentHook = current.memoizedState;
+    }
+  } else {
+    // mount 階段
+    currentHook = null;
+    hook = {
+      memorizedState: null,
+      next: null,
+    };
+    if (workInProgressHook) {
+      workInProgressHook = workInProgressHook.next = hook;
+    } else {
+      workInProgressHook = currentlyRenderingFiber!.memoizedState = hook;
+    }
+  }
+  return hook;
+}
+
+export function useReducer<S, I, A>(
+  reducer: (state: S, action: A) => S,
+  initialArg: I,
+  init?: (initialArg: I) => S
+) {
+  // TODO: 構建Hook鏈表
+  // const hook: Hook = {
+  //   memorizedState: null,
+  //   next: null,
+  // };
+  const hook: Hook = updateWorkInProgressHook();
+  // 省略
+
+  // 初次掛載還是更新
+  // mount階段，初次渲染
+  if (!currentlyRenderingFiber?.alternate) {
+    hook.memorizedState = initialState;
+  }
+}
+```
+
+##### dispatch 事件，修改 hook.memorizedState
+
+> react-reconciler/src/ReactFiberHooks.ts
+
+```ts
+export function useReducer<S, I, A>(
+  reducer: (state: S, action: A) => S,
+  initialArg: I,
+  init?: (initialArg: I) => S
+) {
+  // 省略
+
+  // 之所以會用bind是要保留當前的全局變量，因為currentlyRenderingFiber隨時會變動
+  const dispatch = dispatchReducerAction.bind(
+    null,
+    currentlyRenderingFiber!,
+    hook,
+    reducer as any
+  );
+
+  return [hook.memorizedState, dispatch];
+}
+
+function dispatchReducerAction<S, I, A>(
+  fiber: Fiber,
+  hook: Hook,
+  reducer?: (state: S, action: A) => S,
+  action?: any
+) {
+  hook.memorizedState = reducer ? reducer(hook.memorizedState, action) : action;
+
+  // 重複使用 fiber
+  fiber.alternate = { ...fiber };
+  // 找到 HostRoot
+  const root = getRootForUpdateFiber(fiber);
+  scheduleUpdateOnFiber(root, fiber);
+}
+
+function getRootForUpdateFiber(fiber: Fiber): FiberRoot {
+  let parent = fiber.return;
+  let node = fiber;
+  while (parent !== null) {
+    node = parent;
+    parent = node.return;
+  }
+  // node.stateNode 是 FiberRoot，可以回看，在 createFiberRoot 當中有指向
+  return node.tag === HostRoot ? node.stateNode : null;
+}
+```
+
+```mermaid
+flowchart TB
+HostRootFiber --stateNode--> FiberRootNode
+FiberRootNode --current--> HostRootFiber
+ReactDomRoot --_internalRoot--> FiberRootNode
+FiberRootNode --(containerInfo)--> div#root
+div#root --(_reactContainer$+randomKey)--> HostRootFiber
+```
+
+現在 只是發起調度更新，還沒做 beginWork 協調子節點、compeleteWork 進行更新。
+
+##### render 階段
+
+`scheduleUpdateOnFiber` 發起調度更新後，跑到 `renderRootSync`，`prepareFreshStack` 會準備好 WorkInProgress 樹
+
+```ts
+function renderRootSync(root: FiberRoot) {
+  // 省略
+
+  // ! 2. 初始化數據，準備好 WorkInProgress 樹
+  prepareFreshStack(root);
+
+  // ! 3. 遍歷構建 fiber 樹，深度優先遍歷
+  workLoopSync();
+
+  // 省略
+}
+
+// 準備一顆 WorkInProgress 樹
+function prepareFreshStack(root: FiberRoot): Fiber {
+  root.finishedWork = null;
+
+  workInProgressRoot = root;
+  const rootWorkInprogress = createWorkInProgress(root.current, null);
+
+  if (workInProgress === null) {
+    // 如果是初次渲染的話，workInProgress 才是從根 fiber 開始
+    workInProgress = rootWorkInprogress;
+  }
+
+  return rootWorkInprogress;
+}
+```
+
+`workLoopSync` 執行 `performUnitOfWork`，`beginWork` 剛剛已經處理過了 `updateFunctionComponent` 和 hook 連結，之後要處理協調子節點，看是否要復用 - `reconcileChildren` - `reconcileChildFibers`。因為暫時只有處理單節點 -> `reconcileSingleElement`。
+
+```ts
+// 協調子節點，構建新的 fiber 樹，
+function reconcileChildren(
+  current: Fiber | null,
+  workInProgress: Fiber,
+  nextChildren: any
+) {
+  // 初次渲染
+  if (current === null) {
+    workInProgress.child = mountChildFibers(workInProgress, null, nextChildren);
+  } else {
+    workInProgress.child = reconcileChildFibers(
+      workInProgress,
+      current.child,
+      nextChildren
+    );
+  }
+}
+```
+
+- 節點復用的條件需滿足：
+  1. 同一層級下(如果父節點變化就不算，且比較整個樹成本太高)
+  2. key 相同
+  3. type 相同
+
+```ts
+// 只有協調單個子節點，已經在同一層級下了
+function reconcileSingleElement(
+  returnFiber: Fiber,
+  currentFirstChild: Fiber | null,
+  element: ReactElement
+) {
+  const key = element.key; // 新的子節點的 key
+  let child = currentFirstChild; // 舊的子節點
+  while (child !== null) {
+    if (child.key === key) {
+      const elementType = element.type;
+      if (child.elementType === elementType) {
+        // ! 滿足所有條件了，復用
+        const existing = useFiber(child, element.props);
+        existing.return = returnFiber;
+        return existing;
+      } else {
+        // key 值唯一性，相同層級下只有一個相同的 key，type 不同就不能復用
+        // 所以直接跳出迴圈
+        break;
+      }
+    } else {
+      // 舊的子節點中找不到一樣的key
+      // 加上是走單個節點的邏輯
+      // TODO: delete
+    }
+    child = child.sibling;
+  }
+  const createFiber = createFiberFromElement(element);
+  createFiber.return = returnFiber;
+  return createFiber;
+}
+
+// 復用
+function useFiber(fiber: Fiber, pendingProps: any) {
+  // 新創建 調用 createWorkInProgress，把新的 props 掛載到 fiber 上
+  // 這時候的child 沒有新的alternate 所以會把新的節點 的 stateNode 指向舊的
+  const clone = createWorkInProgress(fiber, pendingProps);
+  clone.index = 0;
+  clone.sibling = null;
+  return clone;
+}
+```
+
+處理完成後要把新的 props 更新到舊的上面。
+
+```ts
+function performUnitOfWork(unitOfWork: Fiber) {
+  // 對應的 老的 current 節點
+  const current = unitOfWork.alternate;
+  // beginWork，返回子節點
+  let next = beginWork(current, unitOfWork);
+  // ! 把新的props更新到舊的上
+  unitOfWork.memoizedProps = unitOfWork.pendingProps;
+  // 沒有子節點了
+  if (next === null) {
+    completeUnitWork(unitOfWork);
+  } else {
+    workInProgress = next;
+  }
+}
+```
+
+走到 `completeUnitWork`，要完成->如果是復用就要拿原本的，不要再次創建！
+
+```ts
+export function completeWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  const { type, pendingProps } = workInProgress;
+
+  switch (workInProgress.tag) {
+    case HostRoot:
+    case Fragment:
+    case ClassComponent:
+    case FunctionComponent: {
+      return null;
+    }
+    // 原生標籤
+    case HostComponent: {
+      // 這邊也要進行復用條件判斷<如果已經有實例了，不需要再次創建
+      if (current !== null && workInProgress.stateNode !== null) {
+        // 比較和更新屬性
+        updateHostComponent(current, workInProgress, type, pendingProps);
+      } else {
+        // 1. 創建真實dom
+        const instance = document.createElement(type);
+
+        // 2. 初始化DOM屬性
+        finalizeInitialChildren(instance, null, pendingProps);
+        appendAllChildren(instance, workInProgress);
+        workInProgress.stateNode = instance;
+        return null;
+      }
+    }
+    case HostText: {
+      workInProgress.stateNode = document.createTextNode(pendingProps);
+      return null;
+    }
+    // TODO: 其他組件標籤 之後再說
+  }
+  throw new Error("不知名的 work tag");
+}
+
+function updateHostComponent(
+  current: Fiber | null,
+  workInProgress: Fiber,
+  type: string,
+  newProps: any
+) {
+  if (current?.memoizedProps === newProps) {
+    return;
+  } else {
+    // 比較和更新屬性
+    finalizeInitialChildren(
+      workInProgress.stateNode,
+      current?.memoizedProps,
+      newProps
+    );
+  }
+}
+
+// 初始化屬性 || 更新屬性，prevProps和nextProps的dom指向一樣的
+function finalizeInitialChildren(
+  domElement: Element,
+  prevProps: any,
+  nextProps: any
+) {
+  for (const propKey in prevProps) {
+    const prevProp = prevProps[propKey];
+    if (propKey === "style") {
+      // TODO:
+    } else if (propKey === "children") {
+      // TODO:
+
+      // 是文本節點
+      if (isStr(prevProp) || isNum(prevProp)) {
+        domElement.textContent = "";
+      }
+    } else {
+      // 處理事件
+      if (propKey === "onClick") {
+        // 移除舊的click事件
+        domElement.removeEventListener("click", prevProp);
+      } else {
+        // 如果新的props沒有，把他設置成空
+        if (!(prevProp in nextProps)) {
+          domElement[propKey] = "";
+        }
+      }
+    }
+  }
+  for (const propKey in nextProps) {
+    const nextProp = nextProps[propKey];
+    if (propKey === "style") {
+      // TODO:
+    } else if (propKey === "children") {
+      // TODO:
+
+      // 是文本節點
+      if (isStr(nextProp) || isNum(nextProp)) {
+        domElement.textContent = `${nextProp}`;
+      }
+    } else {
+      // 處理事件
+      if (propKey === "onClick") {
+        domElement.addEventListener("click", nextProp);
+      } else {
+        domElement[propKey] = nextProp;
+      }
+    }
+  }
+}
+```
+
+如果是更新階段，根節點走到 `beginWork`，
+
+```ts
+// 根 fiber 節點，所需要做的只是，協調子節點
+function updateHostRoot(current: Fiber | null, workInProgress: Fiber) {
+  const nextChildren = current?.memoizedState.element;
+  reconcileChildren(current, workInProgress, nextChildren);
+  // 如果是更新階段，走到此，表示整棵樹都要更新，
+  // 協調子節點完成後，舊的子節點，更新成新的子節點
+  if (current) {
+    current.child = workInProgress.child;
+  }
+  return workInProgress.child;
+}
+```
+
+---
+
+小重點複習：
+
+1. hook 存在 fiber 上的 memoizedState
+2. 他是鏈表
+3. 為什麼 useReducer 會觸發更新？因為會去呼叫 `schedulerUpdateOnFiber`

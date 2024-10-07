@@ -32,7 +32,7 @@ export function scheduleUpdateOnFiber(root: FiberRoot, fiber: Fiber) {
 
   workInProgressRoot = root;
   workInProgress = fiber;
-
+  // TODO: setState 應該要走別的邏輯，暫時走這
   ensureRootIsScheduled(root);
 }
 
@@ -80,7 +80,11 @@ function prepareFreshStack(root: FiberRoot): Fiber {
 
   workInProgressRoot = root;
   const rootWorkInprogress = createWorkInProgress(root.current, null);
-  workInProgress = rootWorkInprogress;
+
+  if (workInProgress === null) {
+    // 如果是初次渲染的話，workInProgress 才是從根 fiber 開始
+    workInProgress = rootWorkInprogress;
+  }
 
   return rootWorkInprogress;
 }
@@ -102,8 +106,10 @@ function workLoopSync() {
 function performUnitOfWork(unitOfWork: Fiber) {
   // 對應的 老的 current 節點
   const current = unitOfWork.alternate;
-  // 1. beginWork，返回子節點
+  // beginWork，返回子節點
   let next = beginWork(current, unitOfWork);
+  // 把新的props更新到舊的上
+  unitOfWork.memoizedProps = unitOfWork.pendingProps;
   // 沒有子節點了
   if (next === null) {
     completeUnitWork(unitOfWork);

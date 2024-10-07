@@ -1,4 +1,5 @@
 import { mountChildFibers, reconcileChildFibers } from "./ReactChildFiber";
+import { renderWithHook } from "./ReactFiberHooks";
 import type { Fiber } from "./ReactInternalTypes";
 import {
   HostComponent,
@@ -47,7 +48,7 @@ function updateClassComponent(current: Fiber | null, workInProgress: Fiber) {
 function updateFunctionComponent(current: Fiber | null, workInProgress: Fiber) {
   const { type, pendingProps } = workInProgress;
   // 調用 render 創造節點
-  const children = type(pendingProps);
+  const children = renderWithHook(current, workInProgress, type, pendingProps);
   reconcileChildren(current, workInProgress, children);
   return workInProgress.child;
 }
@@ -65,6 +66,11 @@ function updateHostText() {
 function updateHostRoot(current: Fiber | null, workInProgress: Fiber) {
   const nextChildren = current?.memoizedState.element;
   reconcileChildren(current, workInProgress, nextChildren);
+  // 如果是更新階段，走到此，表示整棵樹都要更新，
+  // 協調子節點完成後，舊的子節點，更新成新的子節點
+  if (current) {
+    current.child = workInProgress.child;
+  }
   return workInProgress.child;
 }
 // 原生標籤，ex: div, span。初次渲染會進入協調，更新則可能是協調或是 bailout
