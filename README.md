@@ -41,6 +41,7 @@
       - [2.2 新節點還有，老節點沒了，剩下的新增即可，也包含初次渲染](#22-新節點還有老節點沒了剩下的新增即可也包含初次渲染)
       - [2.3 新老節點都還有，改用 Map](#23-新老節點都還有改用-map)
       - [fiber 完成後，進入 commit，補插入節點邏輯](#fiber-完成後進入-commit補插入節點邏輯)
+    - [模擬 useState](#模擬-usestate)
 
 # mini-react
 
@@ -1716,29 +1717,29 @@ export function completeWork(
   }
   ```
 
-  ### 模擬 useReducer
+### 模擬 useReducer
 
-  ```tsx
-  function Comp() {
-    const [count, setC] = useReducer((x) => {
-      return x + 1;
-    }, 0);
+```tsx
+function Comp() {
+  const [count, setC] = useReducer((x) => {
+    return x + 1;
+  }, 0);
 
-    // 僅先處理一個子節點喔
-    return (
-      <button
-        onClick={() => {
-          console.log("??????click");
-          setC();
-        }}
-      >
-        {count}
-      </button>
-    );
-  }
-  ```
+  // 僅先處理一個子節點喔
+  return (
+    <button
+      onClick={() => {
+        console.log("??????click");
+        setC();
+      }}
+    >
+      {count}
+    </button>
+  );
+}
+```
 
-  > react-reconciler/src/ReactFiberCompleteWork.ts
+> react-reconciler/src/ReactFiberCompleteWork.ts
 
 ```ts
 // 初始化屬性 || 更新屬性
@@ -1906,7 +1907,7 @@ function updateWorkInProgressHook(): Hook {
       // 不是 hook0
       // 把當前新的hook掛載到鏈表上，並更新當前的hook
       workInProgressHook = hook = workInProgressHook.next!;
-      currentHook = ㄆ?.next as Hook;
+      currentHook = currentHook?.next as Hook;
     } else {
       // 第一個hook
       workInProgressHook = hook = currentlyRenderingFiber?.memoizedState;
@@ -2608,7 +2609,7 @@ function useFiber(fiber: Fiber, pendingProps: any) {
     - 如果是創建的那刪除老的節點，之後不用再進入比對了
 
 - 紀錄可以復用的相對位置
-- 更新 ` previousNewFiber``previousNewFiber.sibling``oldFiber `
+- 更新 `previousNewFiber`, `previousNewFiber.sibling`, `oldFiber`
 
 ```ts
 function reconcileChildrenArray(
@@ -2981,4 +2982,19 @@ function Comp() {
 }
 
 createRoot(document.getElementById("root")!).render((<Comp />) as any);
+```
+
+### 模擬 useState
+
+- 源碼當中，`useState` 和 `useReducer` 對比
+  1. `useState` 如果 state 沒改變，不會引起改變，`useReducer` 不是！
+  2. reducer 代表的是修改的規則，儲存邏輯。 `useReducer` 比較方便復用這個參數。所以在複雜的狀態下，比方多組件共用同個狀態，但又有很多需要判斷的邏輯，就使用 `useReducer`
+
+在源碼當中，在掛載階段執行的是 `mountState()`，dispatch 會去呼叫 `dispatchSetState`（會去判斷有沒有改變，再做掛載）。在這邊簡化成 `dispatchReducerAction`。源碼中 `updateState` 則是套用 `useReducer`
+
+```ts
+export function useState<S>(initialState: (() => S) | S) {
+  const init = isFn(initialState) ? initialState() : initialState;
+  return useReducer(null, init);
+}
 ```

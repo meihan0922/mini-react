@@ -1,3 +1,4 @@
+import { isFn } from "@mono/shared/utils";
 import { scheduleUpdateOnFiber } from "./ReactFiberWorkLoop";
 import type { Fiber, FiberRoot } from "./ReactInternalTypes";
 import { HostRoot } from "./ReactWorkTags";
@@ -67,7 +68,7 @@ function updateWorkInProgressHook(): Hook {
 }
 
 export function useReducer<S, I, A>(
-  reducer: (state: S, action: A) => S,
+  reducer: ((state: S, action: A) => S) | null,
   initialArg: I,
   init?: (initialArg: I) => S
 ) {
@@ -97,6 +98,17 @@ export function useReducer<S, I, A>(
   );
 
   return [hook.memorizedState, dispatch];
+}
+
+// 源碼當中，useState 和 useReducer 對比
+// 1. useState 如果 state 沒改變，不會引起改變，useReducer 不是！
+// 2. reducer 代表的是修改的規則，儲存邏輯。 useReducer 比較方便復用這個參數。所以在複雜的狀態下，比方多組件共用同個狀態，但又有很多需要判斷的邏輯，就使用 useReducer
+// 在源碼當中，在掛載階段執行的是 mountState()，dispatch 會去呼叫 dispatchSetState（會去判斷有沒有改變，再做掛載）
+// 在這邊簡化成 dispatchReducerAction
+// 源碼中 updateState 則是套用 useReducer
+export function useState<S>(initialState: (() => S) | S) {
+  const init = isFn(initialState) ? initialState() : initialState;
+  return useReducer(null, init);
 }
 
 function dispatchReducerAction<S, I, A>(
