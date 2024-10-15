@@ -4,21 +4,21 @@ import { Fragment, Component, useReducer } from "@mono/react";
 
 function Comp() {
   const [count, setC] = useReducer((x) => x + 1, 0);
-
+  const arr = count % 2 === 0 ? [0, 1, 2, 3] : [0, 2, 1, 3];
   return (
     <div>
-      {count % 2 === 0 ? (
-        <button
-          onClick={() => {
-            console.log("??????click");
-            setC();
-          }}
-        >
-          {count}
-        </button>
-      ) : (
-        <span>1234</span>
-      )}
+      <button
+        onClick={() => {
+          setC();
+        }}
+      >
+        {count}
+      </button>
+      <ul>
+        {arr.map((i) => {
+          return <li key={`li` + i}>{i}</li>;
+        })}
+      </ul>
     </div>
   );
 }

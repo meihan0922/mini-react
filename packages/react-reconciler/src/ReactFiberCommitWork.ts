@@ -76,9 +76,11 @@ function commitPlacement(finishedWork: Fiber) {
     if (parentDOM.containerInfo) {
       parentDOM = parentDOM.containerInfo;
     }
-    if (isHostParent(parentFiber)) {
-      parentDOM.appendChild(domNode);
-    }
+
+    // 遍歷 fiber 尋找 finishedWork 兄弟節點，並且 這個 sibling 有 dom 節點，且是更新的節點
+    // 在本輪不發生移動
+    const before = getHostSibling(finishedWork);
+    insertOrAppendPlacementNode(finishedWork, before, parentDOM);
   } else {
     // 要是根節點是 Fragment，會沒有stateNode
     let child = finishedWork.child;
@@ -86,6 +88,55 @@ function commitPlacement(finishedWork: Fiber) {
       commitPlacement(child);
       child = child.sibling;
     }
+  }
+}
+
+function getHostSibling(fiber: Fiber) {
+  let node = fiber;
+  siblings: while (1) {
+    // 往上找，找到有兄弟節點的節點
+    while (node.sibling === null) {
+      if (node.return === null || isHostParent(node.return)) {
+        return null;
+      }
+      node = node.return;
+    }
+    // 改到兄弟節點上
+    node = node.sibling;
+    // 往下找，找到是 tag 是 Host 節點
+    // 而且不能是本次更新中
+    // ❌ 被標記更新的節點
+    // ❌ 沒有子節點的節點
+    while (!isHost(node)) {
+      // 要馬是初次渲染，新增插入或是移動位置
+      if (node.flags & Placement) {
+        continue siblings;
+      }
+      // 沒有子節點
+      if (node.child === null) {
+        continue siblings;
+      } else {
+        node = node.child;
+      }
+    }
+    // 找到沒有位移的節點
+    // 有 stateNode ，是HostComponent | HostText
+    if (!(node.flags & Placement)) {
+      return node.stateNode;
+    }
+  }
+}
+
+function insertOrAppendPlacementNode(
+  node: Fiber,
+  before: Element,
+  parent: Element
+) {
+  if (before) {
+    // insertBefore(newNode, referenceNode)
+    parent.insertBefore(getStateNode(node), before);
+  } else {
+    parent.appendChild(getStateNode(node));
   }
 }
 

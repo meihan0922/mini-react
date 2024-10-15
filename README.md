@@ -33,7 +33,14 @@
         - [建立 hook 鏈表](#建立-hook-鏈表)
         - [dispatch 事件，修改 hook.memorizedState](#dispatch-事件修改-hookmemorizedstate)
         - [render 階段](#render-階段)
-        - [節點刪除](#節點刪除)
+    - [節點刪除](#節點刪除)
+    - [多節點 DIFF](#多節點-diff)
+      - [DIFF 的邏輯規則](#diff-的邏輯規則)
+      - [1.從左邊往右邊遍歷，按照位置比較，如果可以復用，就復用。不能復用就退出當前循環](#1從左邊往右邊遍歷按照位置比較如果可以復用就復用不能復用就退出當前循環)
+      - [2.1 遍歷比較後，遇到不同的，跳出迴圈，要繼續比較剩餘的節點。](#21-遍歷比較後遇到不同的跳出迴圈要繼續比較剩餘的節點)
+      - [2.2 新節點還有，老節點沒了，剩下的新增即可，也包含初次渲染](#22-新節點還有老節點沒了剩下的新增即可也包含初次渲染)
+      - [2.3 新老節點都還有，改用 Map](#23-新老節點都還有改用-map)
+      - [fiber 完成後，進入 commit，補插入節點邏輯](#fiber-完成後進入-commit補插入節點邏輯)
 
 # mini-react
 
@@ -351,10 +358,10 @@ export default { createRoot };
 > @mono/react-reconciler/src/ReactFiberReconciler.ts
 
 1. 獲取 current, lane
-2. 創建 update
-3. update 入隊放到暫存區
+2. 創建 update // 這裡先略過
+3. update 入隊放到暫存區 // 這裡先略過
 4. scheduleUpdateOnFiber 啟動調度
-5. entangleTranstions
+5. entangleTranstions // 這裡先略過
 
 ```ts
 import { ReactNodeList } from "@mono/shared/ReactTypes";
@@ -2265,7 +2272,7 @@ function updateHostRoot(current: Fiber | null, workInProgress: Fiber) {
 2. 他是鏈表
 3. 為什麼 useReducer 會觸發更新？因為會去呼叫 `schedulerUpdateOnFiber`
 
-##### 節點刪除
+### 節點刪除
 
 刪除子節點，紀錄在父節點 fiber 結構的 `deletions`，比起在子節點上一一掛在 flags 上要高效，到 commit 階段直接遍歷刪除
 
@@ -2426,3 +2433,552 @@ function commitDeletions(
 ```
 
 這個時候就可以實現刪除節點了！
+
+### 多節點 DIFF
+
+假設有個陣列，在更新後，他的 key 值是這樣變化的
+
+- old 0 1 2 3 4
+- new 0 1 2 3
+
+```tsx
+function Comp() {
+  const [count, setC] = useReducer((x) => x + 1, 0);
+  const arr = count % 2 === 0 ? [0, 1, 2, 3, 4] : [0, 1, 2, 3];
+  return (
+    <div>
+      <button
+        onClick={() => {
+          setC();
+        }}
+      >
+        {count}
+      </button>
+      <ul>
+        {arr.map((i) => {
+          return <li key={`li` + i}>{i}</li>;
+        })}
+      </ul>
+    </div>
+  );
+}
+```
+
+如果一個一個找，這會很麻煩（比方說 先找 3，遍歷一次，再找 2 ，遍歷一次）。實際應用上，節點相對位置是不變的。
+
+#### DIFF 的邏輯規則
+
+1. 從左邊向右遍歷，如果可以復用則繼續向右，不然就停止。(假設多數的列表都不會發生大規模的移動置換可以解決大部分問題)(vue 是從右往左遍歷，按位置比較，如果不能復用就退出本輪)
+2. 遇到不同了，沒辦法復用了，新老節點的判斷：
+   - 新節點沒了，但老節點還有。則刪除剩餘的老節點
+   - 新節點還有，老節點沒了，剩下的新增即可，也包含初次渲染
+   - 新老節點都還有，但是因為老 fiber 是鏈表，不方便快速的 get 和 delete。因此把老 fiber 鏈表中的節點放入 Map 中，後續操作這個 Map。
+     - 如果是組件更新階段，新節點已經遍歷完成了，能復用的老節點都用完了，則最後查找 Map 當中是否還有元素，如果有，就表示新節點裡不能復用的，就只能刪除
+
+---
+
+#### 1.從左邊往右邊遍歷，按照位置比較，如果可以復用，就復用。不能復用就退出當前循環
+
+先試著處理
+old [0, 1, 2]
+new [0, 1, 2, 3]
+
+> react-reconciler/src/ReactChildFiber.ts
+
+```ts
+function reconcileChildrenArray(
+  returnFiber: Fiber,
+  currentFirstChild: Fiber | null,
+  newChildren: Array<any>
+) {
+  let newIdx = 0;
+  // 頭節點，也是要返回的值
+  let resultFirstChild: Fiber | null = null;
+  // 紀錄比對中的老 fiber，初始是頭節點
+  let oldFiber = currentFirstChild;
+  // 紀錄前 Fiber，後續要將 previousNewFiber sibling 指向 新 fiber
+  let previousNewFiber: Fiber | null = null;
+  // oldFiber.sibling
+  let nextOldFiber = null;
+
+  // 1. 從左邊往右邊遍歷，按照位置比較，如果可以復用，就復用。不能復用就退出當前循環
+  // 他的假設前提是，應該會盡可能的和原來的順序一樣
+  for (; oldFiber !== null && newIdx < newChildren.length; newIdx++) {
+    if (oldFiber.index > newIdx) {
+      // ???? 雖然源碼這樣寫，但想不到什麼時候會有這樣的狀況
+      // ???? 用於處理現有子組件在新子組件列表中沒有對應位置的情況，為了優化子組件的復用和刪除邏輯
+      // ???? 按照位置比，如果舊的已經超前，就跳過
+      nextOldFiber = oldFiber;
+      // A. 不進行比較了，直接創造新的
+      oldFiber = null;
+    } else {
+      // 紀錄下一個 fiber
+      nextOldFiber = oldFiber.sibling;
+    }
+    // 比對新舊，看是否要復用
+    const newFiber = updateSlot(returnFiber, oldFiber, newChildren[newIdx]);
+    // 先暫停
+  }
+}
+```
+
+```ts
+// 建立一個比對的函式，看是否要復用
+// 一樣條件是 key 和 type 要一樣
+function updateSlot(returnFiber: Fiber, oldFiber: Fiber | null, newChild: any) {
+  // 判斷節點可以復用嗎
+  const key = oldFiber !== null ? oldFiber.key : null;
+
+  // 像是 reconcileChildFibers 也要先處理文字節點，再去判斷，
+  if (isText(newChild)) {
+    // 如果是文本節點 是沒有key的
+    // 新節點是文本，老節點不是
+    if (key !== null) {
+      // 確定完完全全的不同，也有可能之後key和其他老節點可以匹配，所以先跳過
+      return null;
+    } else {
+      // key 一樣！！
+      // 有可能可以復用
+      // 所以要馬復用，要馬創建新的，而且確定處理完可以把舊的刪掉
+      return updateTextNode(returnFiber, oldFiber, newChild + "");
+    }
+  }
+
+  if (typeof newChild === "object" && newChild !== null) {
+    if (newChild.key === key) {
+      return updateElement(returnFiber, oldFiber, newChild);
+    } else {
+      // 不能復用，之後老節點要刪除，新節點創建
+      return null;
+    }
+  }
+}
+
+function updateTextNode(
+  returnFiber: Fiber,
+  current: Fiber | null,
+  textContent: string
+) {
+  // current === null 給 2.3 後續沒有比對上時使用
+  if (current === null || current.tag !== HostText) {
+    // 老節點不是文本節點，但已經確定 key 是一樣的了，直接創建新的
+    const created = createFiberFromText(textContent);
+    created.return = returnFiber;
+    return created;
+  } else {
+    // 復用
+    const existing = useFiber(current, textContent);
+    existing.return = returnFiber;
+    return existing;
+  }
+}
+
+function updateElement(
+  returnFiber: Fiber,
+  current: Fiber | null,
+  element: any
+) {
+  const elementType = element.type;
+  if (current !== null && current.elementType === elementType) {
+    // 復用
+    const existing = useFiber(current, element.props);
+    existing.return = returnFiber;
+    return existing;
+  }
+  // current === null 給 2.3 後續沒有比對上時使用
+  const created = createFiberFromElement(element);
+  created.return = returnFiber;
+  return created;
+}
+
+function useFiber(fiber: Fiber, pendingProps: any) {
+  const clone = createWorkInProgress(fiber, pendingProps);
+  clone.index = 0;
+  clone.sibling = null;
+  return clone;
+}
+```
+
+回到 `reconcileChildrenArray()`，比對完成後
+
+- `updateSlot()`
+
+  - 回傳的 null，表示 key 不同，不能復用，有可能是位置置換了或是全新的節點。
+  - 有值，表示 key 相同，去判斷是復用的還是新創建的
+    - 如果是創建的那刪除老的節點，之後不用再進入比對了
+
+- 紀錄可以復用的相對位置
+- 更新 ` previousNewFiber``previousNewFiber.sibling``oldFiber `
+
+```ts
+function reconcileChildrenArray(
+  returnFiber: Fiber,
+  currentFirstChild: Fiber | null,
+  newChildren: Array<any>
+) {
+  let newIdx = 0;
+  // 頭節點
+  let resultFirstChild: Fiber | null = null;
+  // 紀錄比對中的老 fiber，初始是頭節點
+  let oldFiber = currentFirstChild;
+  // 紀錄前 Fiber，後續要將 previousNewFiber sibling 指向 新 fiber
+  let previousNewFiber: Fiber | null = null;
+  // oldFiber.sibling
+  let nextOldFiber = null;
+  // 用來記錄最後一個，新節點相對於老節點 不變的位置
+  let lastPlacedIndex = 0;
+  let lastPlacedIndex = 0; // 一個基準！用來記錄最後一個，新節點相對於老節點 不變的位置
+
+  // 1. 從左邊往右邊遍歷，按照位置比較，如果可以復用，就復用。不能復用就退出當前循環
+  // 他的假設前提是，應該會盡可能的和原來的順序一樣
+  for (; oldFiber !== null && newIdx < newChildren.length; newIdx++) {
+    if (oldFiber.index > newIdx) {
+      // ???? 雖然源碼這樣寫，但想不到什麼時候會有這樣的狀況
+      // ???? 用於處理現有子組件在新子組件列表中沒有對應位置的情況，為了優化子組件的復用和刪除邏輯
+      // ???? 按照位置比，如果舊的已經超前，就跳過
+      nextOldFiber = oldFiber;
+      // A. 不進行比較了，直接創造新的
+      oldFiber = null;
+    } else {
+      nextOldFiber = oldFiber.sibling;
+    }
+    const newFiber = updateSlot(returnFiber, oldFiber, newChildren[newIdx]);
+    // 沒辦法復用
+    if (newFiber === null) {
+      // 有可能走到 A.，換下個位置，再去遍歷復用
+      if (oldFiber === null) {
+        oldFiber = nextOldFiber;
+      }
+      break;
+    }
+
+    // 更新階段，
+    if (shouldTrackSideEffect) {
+      // 還是沒辦法復用(在比較中 key相同，但 type 不一樣，會立刻創建新的)，這時候可以確定刪掉了
+      // 但比較中完全不一樣時，newFiber 是 null，舊的節點後續可能繼續被比較
+      if (oldFiber && newFiber?.alternate === null) {
+        deleteChild(returnFiber, oldFiber);
+      }
+    }
+    // 判斷節點相對位置是否發生變化，組件更新階段在更新前後的位置是否一樣
+    lastPlacedIndex = placeChild(newFiber as Fiber, lastPlacedIndex, newIdx);
+
+    if (previousNewFiber === null) {
+      resultFirstChild = newFiber as Fiber;
+    } else {
+      (previousNewFiber as Fiber).sibling = newFiber as Fiber;
+    }
+    previousNewFiber = newFiber as Fiber;
+    oldFiber = nextOldFiber;
+  }
+}
+
+// 判斷有沒有需要移動位置
+function placeChild(
+  newFiber: Fiber,
+  lastPlacedIndex: number, // 新fiber 在老 fiber 的位置
+  newIndex: number
+) {
+  newFiber.index = newIndex;
+
+  if (!shouldTrackSideEffect) return lastPlacedIndex;
+  const current = newFiber.alternate;
+  // 是復用來著
+  if (current !== null) {
+    // TODO: 移動位置的狀況
+
+    // 不需要移動位置
+    return oldIndex;
+  } else {
+    // flags 標記上 更新
+    newFiber.flags |= Placement;
+    return lastPlacedIndex;
+  }
+}
+```
+
+#### 2.1 遍歷比較後，遇到不同的，跳出迴圈，要繼續比較剩餘的節點。
+
+如果此時 `newIdx === newChildren.length`，表示新節點已經遍歷完成，刪除剩餘的老節點即可。
+
+```ts
+// 2.1 老節點還有，新節點沒了，刪除剩餘的老節點
+if (newIdx === newChildren.length) {
+  deleteRemaingChildren(returnFiber, oldFiber);
+  return resultFirstChild;
+}
+```
+
+#### 2.2 新節點還有，老節點沒了，剩下的新增即可，也包含初次渲染
+
+如果此時，新節點還有，但老節點沒了，表示後續的節點是新增的，也包含初次渲染（初次渲染也是沒有老節點）
+
+```ts
+if (oldFiber === null) {
+  for (; newIdx < newChildren.length; newIdx++) {
+    const newFiber = createChild(returnFiber, newChildren[newIdx]);
+    // 沒有有效的創建，就不需要創建fiber
+    if (newFiber === null) continue;
+    // 更新階段，判斷更新前後位置是否一致，是否要移動位置，因為是鏈表所以要記index
+    lastPlacedIndex = placeChild(newFiber as Fiber, lastPlacedIndex, newIdx);
+
+    if (previousNewFiber === null) {
+      // 紀錄頭節點，不能用 index 判斷，因為有可能 null，null 就不是有效的 fiber
+      resultFirstChild = newFiber;
+    } else {
+      // 把前一個節點的兄弟節點重新指向
+      previousNewFiber.sibling = newFiber;
+    }
+    previousNewFiber = newFiber;
+  }
+  return resultFirstChild;
+}
+```
+
+#### 2.3 新老節點都還有，改用 Map
+
+新老節點都還有，但是因為老 fiber 是鏈表，不方便快速的 get 和 delete。因此把老 fiber 鏈表中的節點放入 Map 中，後續操作這個 Map。
+
+比方 new[0,1,2,3,4] old[0,1,2,4]
+[0,1,2] 已經在 2.1 被處理，[3,4] 尚未處理。
+新老節點都還有。
+
+```ts
+function mapRemainingChildren(oldFiber: Fiber) {
+  let existingChildren: Map<string | number, Fiber> = new Map();
+  let existingChild: Fiber | null = oldFiber;
+  while (existingChild !== null) {
+    if (existingChild.key !== null) {
+      existingChildren.set(existingChild.key, existingChild);
+    } else {
+      existingChildren.set(existingChild.index, existingChild);
+    }
+    existingChild = existingChild.sibling;
+  }
+  return existingChildren;
+}
+
+function updateFromMap(
+  existingChildren: Map<string | number, Fiber>,
+  returnFiber: Fiber,
+  newIdx: number,
+  newChild: Fiber
+) {
+  if (isText(newChild)) {
+    const matchedFiber = existingChildren.get(newIdx) || null;
+    return updateTextNode(returnFiber, matchedFiber, "" + newChild);
+  } else {
+    const matchedFiber =
+      existingChildren.get(newChild.key === null ? newIdx : newChild.key) ||
+      null;
+    return updateElement(returnFiber, matchedFiber, newChild);
+  }
+}
+```
+
+回到 `reconcileChildrenArray`
+
+```ts
+const existingChildren = mapRemainingChildren(oldFiber);
+for (; newIdx < newChildren.length; newIdx++) {
+  const newFiber = updateFromMap(
+    existingChildren,
+    returnFiber,
+    newIdx,
+    newChildren[newIdx]
+  );
+  // 不管有沒有復用，都應該會有值
+  if (newFiber !== null) {
+    if (shouldTrackSideEffect) {
+      // 更新階段 已經比對過了，所以可以瘦身，減少map的大小
+      existingChildren.delete(newFiber?.key === null ? newIdx : newFiber!.key);
+    }
+    lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
+
+    if (previousNewFiber === null) {
+      // 頭節點
+      resultFirstChild = newFiber;
+    } else {
+      previousNewFiber.sibling = newFiber;
+    }
+    previousNewFiber = newFiber;
+  }
+
+  if (shouldTrackSideEffect) {
+    // 新節點已經都完成了，剩下老節點要清除
+    // Any existing children that weren't consumed above were deleted. We need
+    // to add them to the deletion list.
+    existingChildren.forEach((child) => deleteChild(returnFiber, child));
+  }
+
+  return resultFirstChild;
+}
+```
+
+```ts
+// 判斷有沒有需要移動位置
+function placeChild(
+  newFiber: Fiber,
+  lastPlacedIndex: number, // 新fiber 在老 fiber 的位置
+  newIndex: number
+) {
+  newFiber.index = newIndex;
+
+  if (!shouldTrackSideEffect) return lastPlacedIndex;
+  const current = newFiber.alternate;
+  // 復用來著
+  if (current !== null) {
+    // old [0, 1, 2, 3]
+    // new [0, 2, 1, 3]
+    const oldIndex = current.index;
+    // lastPlacedIndex = 0 在 2.1 時確定下來
+    // 跳出迴圈後進入 2.3
+    // new 2; 在 oldIndex 2 的位置
+    // lastPlacedIndex = 0 => 2; 2 變成基準
+    // new 1; 在 oldIndex 1 的位置
+    // lastPlacedIndex 2; oldIndex(1) < lastPlacedIndex(2)
+    // 新的1的位置，相較於上一個沒有變動的2來說，是移動到了2的後面
+    // 1 應該要被標記為換位置
+    // return 2; 2維持基準
+
+    if (oldIndex < lastPlacedIndex) {
+      newFiber.flags |= Placement;
+      return lastPlacedIndex;
+    } else {
+      // 不需要移動相對位置
+      return oldIndex;
+    }
+  } else {
+    // flags 標記上 更新
+    newFiber.flags |= Placement;
+    return lastPlacedIndex;
+  }
+}
+```
+
+#### fiber 完成後，進入 commit，補插入節點邏輯
+
+在全部的 fiber 都被整理過後，進入 commit 階段，但當時只有寫
+Append node，應該要寫個判斷說
+
+之前的寫法，要改寫 `// !!!!` 的區塊
+
+```ts
+function commitPlacement(finishedWork: Fiber) {
+  // 目前先把 HostComponent 渲染上去，之後再處理其他組件的情況
+  if (finishedWork.stateNode && isHost(finishedWork)) {
+    const domNode = finishedWork.stateNode;
+    const parentFiber = getHostParentFiber(finishedWork);
+    // 要找到最接近的祖先節點 是 Host 的 fiber，再把他塞進去
+    // Host 節點有三種 HostRoot, HostComponent, HostText(不能有子節點)
+    let parentDOM = parentFiber.stateNode;
+    // HostRoot 的實例存在 containerInfo 中
+    if (parentDOM.containerInfo) {
+      parentDOM = parentDOM.containerInfo;
+    }
+    // !!!! 這段，所以不管怎樣所有的 fiber 都會插入在 parentDOM 裡的最後
+    // if (isHostParent(parentFiber)) {
+    //   parentDOM.appendChild(domNode);
+    // }
+
+    // 遍歷 fiber 尋找 finishedWork 兄弟節點，並且 這個 sibling 有 dom 節點，且是更新的節點
+    // 在本輪不發生移動
+    const before = getHostSibling(finishedWork);
+    insertOrAppendPlacementNode(finishedWork, before, parentDOM);
+  } else {
+    // 要是根節點是 Fragment，會沒有stateNode
+    let child = finishedWork.child;
+    while (child !== null) {
+      commitPlacement(child);
+      child = child.sibling;
+    }
+  }
+}
+```
+
+```ts
+function insertOrAppendPlacementNode(
+  node: Fiber,
+  before: Element,
+  parent: Element
+) {
+  if (before) {
+    // insertBefore(newNode, referenceNode)
+    parent.insertBefore(getStateNode(node), before);
+  } else {
+    parent.appendChild(getStateNode(node));
+  }
+}
+```
+
+創造 `getHostSibling()`，遍歷 fiber 尋找 finishedWork 兄弟節點，並且 這個 sibling 有 dom 節點，且是更新的節點，在本輪不發生移動
+
+```ts
+function getHostSibling(fiber: Fiber) {
+  let node = fiber;
+  siblings: while (1) {
+    // 往上找，找到有兄弟節點的節點
+    while (node.sibling === null) {
+      if (node.return === null || isHostParent(node.return)) {
+        return null;
+      }
+      node = node.return;
+    }
+    // 改到兄弟節點上
+    node = node.sibling;
+    // 往下找，找到是 tag 是 Host 節點
+    // 而且不能是本次更新中
+    // ❌ 被標記更新的節點
+    // ❌ 沒有子節點的節點
+    while (!isHost(node)) {
+      // 要馬是初次渲染，新增插入或是移動位置
+      if (node.flags & Placement) {
+        continue siblings;
+      }
+      // 沒有子節點
+      if (node.child === null) {
+        continue siblings;
+      } else {
+        node = node.child;
+      }
+    }
+    // 找到沒有位移的節點
+    // 有 stateNode ，是HostComponent | HostText
+    if (!(node.flags & Placement)) {
+      return node.stateNode;
+    }
+  }
+}
+```
+
+目前為止，已經完成了 多節點的變化渲染，可以針對不同的陣列渲染成不同的列表了
+
+```tsx
+// import { createRoot } from "react-dom/client";
+import { createRoot } from "@mono/react-dom/client";
+import { Fragment, Component, useReducer } from "@mono/react";
+
+function Comp() {
+  const [count, setC] = useReducer((x) => x + 1, 0);
+  const arr = count % 2 === 0 ? [0, 2, 1, 3, 4] : [0, 2, 1, 3];
+  // const arr = count % 2 === 0 ? [0, 1, 2, 3] : [0, 2, 1, 3];
+  return (
+    <div>
+      <button
+        onClick={() => {
+          setC();
+        }}
+      >
+        {count}
+      </button>
+      <ul>
+        {arr.map((i) => {
+          return <li key={`li` + i}>{i}</li>;
+        })}
+      </ul>
+    </div>
+  );
+}
+
+createRoot(document.getElementById("root")!).render((<Comp />) as any);
+```
