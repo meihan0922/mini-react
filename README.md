@@ -2525,7 +2525,7 @@ function reconcileChildrenArray(
 
 ```ts
 // 建立一個比對的函式，看是否要復用
-// 一樣條件是 key 和 type 要一樣
+// 條件是 key 和 type 要一樣
 function updateSlot(returnFiber: Fiber, oldFiber: Fiber | null, newChild: any) {
   // 判斷節點可以復用嗎
   const key = oldFiber !== null ? oldFiber.key : null;
@@ -2553,6 +2553,9 @@ function updateSlot(returnFiber: Fiber, oldFiber: Fiber | null, newChild: any) {
       return null;
     }
   }
+
+  // ! 如果是 null, undefined, boolean 需要回傳 空值
+  return null;
 }
 
 function updateTextNode(
@@ -2768,12 +2771,14 @@ function updateFromMap(
   if (isText(newChild)) {
     const matchedFiber = existingChildren.get(newIdx) || null;
     return updateTextNode(returnFiber, matchedFiber, "" + newChild);
-  } else {
+  } else if (typeof newChild === "object" && newChild !== null) {
     const matchedFiber =
       existingChildren.get(newChild.key === null ? newIdx : newChild.key) ||
       null;
     return updateElement(returnFiber, matchedFiber, newChild);
   }
+  // null, undefined, boolean 回傳空值
+  return null;
 }
 ```
 
@@ -2788,7 +2793,7 @@ for (; newIdx < newChildren.length; newIdx++) {
     newIdx,
     newChildren[newIdx]
   );
-  // 不管有沒有復用，都應該會有值
+  // 不管有沒有復用，都應該會有值，除非是 null, undefined, boolean 回傳空值
   if (newFiber !== null) {
     if (shouldTrackSideEffect) {
       // 更新階段 已經比對過了，所以可以瘦身，減少map的大小
@@ -2804,16 +2809,16 @@ for (; newIdx < newChildren.length; newIdx++) {
     }
     previousNewFiber = newFiber;
   }
-
-  if (shouldTrackSideEffect) {
-    // 新節點已經都完成了，剩下老節點要清除
-    // Any existing children that weren't consumed above were deleted. We need
-    // to add them to the deletion list.
-    existingChildren.forEach((child) => deleteChild(returnFiber, child));
-  }
-
-  return resultFirstChild;
 }
+
+if (shouldTrackSideEffect) {
+  // 新節點已經都完成了，剩下老節點要清除
+  // Any existing children that weren't consumed above were deleted. We need
+  // to add them to the deletion list.
+  existingChildren.forEach((child) => deleteChild(returnFiber, child));
+}
+
+return resultFirstChild;
 ```
 
 ```ts

@@ -202,6 +202,9 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
         return null;
       }
     }
+
+    // ! 如果是 null, undefined, boolean 需要回傳 空值
+    return null;
   }
 
   function placeChild(
@@ -252,12 +255,14 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
     if (isText(newChild)) {
       const matchedFiber = existingChildren.get(newIdx) || null;
       return updateTextNode(returnFiber, matchedFiber, "" + newChild);
-    } else {
+    } else if (typeof newChild === "object" && newChild !== null) {
       const matchedFiber =
         existingChildren.get(newChild.key === null ? newIdx : newChild.key) ||
         null;
       return updateElement(returnFiber, matchedFiber, newChild);
     }
+    // 是 null, undefined, boolean 回傳空值
+    return null;
   }
 
   function reconcileChildrenArray(
@@ -366,7 +371,7 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
         newIdx,
         newChildren[newIdx]
       );
-      // 不管有沒有復用，都應該會有值
+      // 不管有沒有復用，都應該會有值，除非是 null, undefined, boolean 回傳空值
       if (newFiber !== null) {
         if (shouldTrackSideEffect) {
           // 更新階段 已經比對過了，所以可以瘦身，減少map的大小
