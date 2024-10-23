@@ -3,4 +3,5 @@ export { Component } from "./src/ReactBaseClasses";
 export {
   useReducer,
   useState,
+  useMemo,
 } from "@mono/react-reconciler/src/ReactFiberHooks";

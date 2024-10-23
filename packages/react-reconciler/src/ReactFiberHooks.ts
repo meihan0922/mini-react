@@ -132,3 +132,38 @@ function getRootForUpdateFiber(fiber: Fiber): FiberRoot {
   }
   return node.tag === HostRoot ? node.stateNode : null;
 }
+
+export function useMemo<T>(
+  nextCreate: () => T,
+  deps: Array<any> | void | null
+): T {
+  const hook: Hook = updateWorkInProgressHook();
+  const nextDeps = deps === undefined ? null : deps;
+  const prevState = hook.memorizedState;
+  if (prevState !== null) {
+    if (nextDeps !== null) {
+      const prevDeps = prevState[1];
+      if (areHookInputEqual(nextDeps, prevDeps)) {
+        // 依賴沒有變化，返回緩存的結果
+        return prevState[0];
+      }
+    }
+  }
+  const nextVal = nextCreate();
+  hook.memorizedState = [nextVal, nextDeps];
+  return nextVal;
+}
+
+// 檢查 hook deps 是否發生變化
+export function areHookInputEqual(nextDeps: Array<any>, prevDeps: Array<any>) {
+  if (prevDeps === null) {
+    return false;
+  }
+  for (let i = 0; i < prevDeps.length && i < nextDeps.length; i++) {
+    if (Object.is(prevDeps[i], nextDeps[i])) {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}

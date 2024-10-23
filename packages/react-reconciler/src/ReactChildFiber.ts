@@ -371,7 +371,7 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
         newIdx,
         newChildren[newIdx]
       );
-      // 不管有沒有復用，都應該會有值，除非是 null, undefined, boolean 回傳空值
+      // newFiber 不管有沒有復用，都應該會有值，除非是 null, undefined, boolean 回傳空值
       if (newFiber !== null) {
         if (shouldTrackSideEffect) {
           // 更新階段 已經比對過了，所以可以瘦身，減少map的大小

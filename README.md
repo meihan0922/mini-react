@@ -42,6 +42,7 @@
       - [2.3 新老節點都還有，改用 Map](#23-新老節點都還有改用-map)
       - [fiber 完成後，進入 commit，補插入節點邏輯](#fiber-完成後進入-commit補插入節點邏輯)
     - [模擬 useState](#模擬-usestate)
+    - [模擬 useMemo](#模擬-usememo)
 
 # mini-react
 
@@ -3001,5 +3002,101 @@ createRoot(document.getElementById("root")!).render((<Comp />) as any);
 export function useState<S>(initialState: (() => S) | S) {
   const init = isFn(initialState) ? initialState() : initialState;
   return useReducer(null, init);
+}
+```
+
+### 模擬 useMemo
+
+每次重新渲染能夠緩存計算的結果。
+
+```ts
+const cached = useMemo(calc, dependencies);
+```
+
+- `calc`: 必須是一個純函式。可以返回任意的類型。會在首次渲染時調用緩存。除非`dependencies`發生變化，重新返回計算結果。通常不帶參數。
+- `dependencies`: 使用 `Object.is` 將每個依賴和之前的值進行比較。
+
+```tsx
+function Comp() {
+  const [count, setCount] = useReducer((x) => x + 1, 0);
+  const [count1, setCount1] = useState(1);
+  const arr = count % 2 === 0 ? [0, 1, 2, 3] : [0, 2, 1, 3];
+
+  const calcVal = useMemo(() => {
+    console.log("useMemo");
+    let sum = 0;
+    for (let i = 0; i < count1; i++) {
+      sum += 1;
+    }
+    return sum;
+  }, [count1]);
+
+  return (
+    <div>
+      <button
+        onClick={() => {
+          setCount();
+        }}
+      >
+        {count}
+      </button>
+      <ul>
+        {arr.map((i) => {
+          return <li key={`li` + i}>{i}</li>;
+        })}
+      </ul>
+      <button
+        onClick={() => {
+          setCount1(count1 + 1);
+        }}
+      >
+        {count1}
+      </button>
+      <p>{calcVal}</p>
+      {count1 % 2 === 0 ? <h1>null</h1> : null}
+      {count1 % 2 === 0 ? <h1>undefined</h1> : undefined}
+      {count1 % 2 === 0 && <h1>boolean</h1>}
+    </div>
+  );
+}
+
+createRoot(document.getElementById("root")!).render((<Comp />) as any);
+```
+
+> react-reconciler/src/ReactFiberHooks.ts
+
+```ts
+export function useMemo<T>(
+  nextCreate: () => T,
+  deps: Array<any> | void | null
+): T {
+  const hook: Hook = updateWorkInProgressHook();
+  const nextDeps = deps === undefined ? null : deps;
+  const prevState = hook.memorizedState;
+  if (prevState !== null) {
+    if (nextDeps !== null) {
+      const prevDeps = prevState[1];
+      if (areHookInputEqual(nextDeps, prevDeps)) {
+        // 依賴沒有變化，返回緩存的結果
+        return prevState[0];
+      }
+    }
+  }
+  const nextVal = nextCreate();
+  hook.memorizedState = [nextVal, nextDeps];
+  return nextVal;
+}
+// 檢查 hook deps 是否發生變化
+export function areHookInputEqual(nextDeps: Array<any>, prevDeps: Array<any>) {
+  if (prevDeps === null) {
+    return false;
+  }
+  for (let i = 0; i < prevDeps.length && i < nextDeps.length; i++) {
+    if (Object.is(prevDeps[i], nextDeps[i])) {
+      continue;
+    }
+    return false;
+  }
+  return true;
 }
 ```
