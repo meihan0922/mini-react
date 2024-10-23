@@ -167,3 +167,24 @@ export function areHookInputEqual(nextDeps: Array<any>, prevDeps: Array<any>) {
   }
   return true;
 }
+
+export function useCallback<T extends Function>(
+  callback: T,
+  deps: Array<any> | void | null
+): T {
+  const hook: Hook = updateWorkInProgressHook();
+  const nextDeps = deps === undefined ? null : deps;
+  const prevState = hook.memorizedState;
+  if (prevState !== null) {
+    if (nextDeps !== null) {
+      const prevDeps = prevState[1];
+      if (areHookInputEqual(nextDeps, prevDeps)) {
+        // 依賴沒有變化，返回緩存的結果
+        return prevState[0];
+      }
+    }
+  }
+  hook.memorizedState = [callback, nextDeps];
+
+  return callback;
+}

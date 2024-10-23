@@ -43,6 +43,7 @@
       - [fiber 完成後，進入 commit，補插入節點邏輯](#fiber-完成後進入-commit補插入節點邏輯)
     - [模擬 useState](#模擬-usestate)
     - [模擬 useMemo](#模擬-usememo)
+    - [模擬 useCallback](#模擬-usecallback)
 
 # mini-react
 
@@ -3098,5 +3099,114 @@ export function areHookInputEqual(nextDeps: Array<any>, prevDeps: Array<any>) {
     return false;
   }
   return true;
+}
+```
+
+### 模擬 useCallback
+
+如果函式以`props`往子組件傳遞，子組件已經包裹過`memo`，但父組件每次更新時，函式都是新的。
+
+```tsx
+const Child = memo(({ addClick }: { addClick: () => number }) => {
+  return (
+    <div>
+      <h1>child</h1>
+      <button onClick={addClick}>addClick</button>
+    </div>
+  );
+});
+
+function Comp() {
+  const [count1, setCount1] = useState(1);
+
+  function addClick() {
+    let sum = 0;
+    for (let i = 0; i < count1; i++) {
+      sum += 1;
+    }
+    return sum;
+  }
+
+  return (
+    <div>
+      <button
+        onClick={() => {
+          setCount1(count1 + 1);
+        }}
+      >
+        {count1}
+      </button>
+      <Child addClick={addClick} />
+    </div>
+  );
+}
+```
+
+但因為目前還沒有實現`memo`，所以先測試會不會在`count`變化時`console.log`就好
+
+```tsx
+function Comp() {
+  const [count, setCount] = useReducer((x) => x + 1, 0);
+  const [count1, setCount1] = useState(1);
+
+  const addClick = useCallback(() => {
+    let sum = 0;
+    for (let i = 0; i < count1; i++) {
+      sum += 1;
+    }
+    return sum;
+  }, [count1]);
+
+  const calcVal = useMemo(() => {
+    console.log("addClick");
+    return addClick();
+  }, [addClick]);
+
+  return (
+    <div>
+      <button
+        onClick={() => {
+          setCount();
+        }}
+      >
+        {count}
+      </button>
+      <button
+        onClick={() => {
+          setCount1(count1 + 1);
+        }}
+      >
+        {count1}
+      </button>
+      <p>{calcVal}</p>
+    </div>
+  );
+}
+```
+
+他的邏輯和`useMemo`差不多，只是改存 callback 而已
+
+> react-reconciler/src/ReactFiberHooks.ts
+
+```ts
+export function useCallback<T extends Function>(
+  callback: T,
+  deps: Array<any> | void | null
+): T {
+  const hook: Hook = updateWorkInProgressHook();
+  const nextDeps = deps === undefined ? null : deps;
+  const prevState = hook.memorizedState;
+  if (prevState !== null) {
+    if (nextDeps !== null) {
+      const prevDeps = prevState[1];
+      if (areHookInputEqual(nextDeps, prevDeps)) {
+        // 依賴沒有變化，返回緩存的結果
+        return prevState[0];
+      }
+    }
+  }
+  hook.memorizedState = [callback, nextDeps];
+
+  return callback;
 }
 ```
