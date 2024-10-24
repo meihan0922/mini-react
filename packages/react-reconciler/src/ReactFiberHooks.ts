@@ -188,3 +188,12 @@ export function useCallback<T extends Function>(
 
   return callback;
 }
+
+export function useRef<T>(data: T): { current: T } {
+  const hook: Hook = updateWorkInProgressHook();
+  // 初次掛載
+  if (currentHook === null) {
+    hook.memorizedState = { current: data };
+  }
+  return hook.memorizedState;
+}

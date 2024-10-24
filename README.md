@@ -44,6 +44,7 @@
     - [模擬 useState](#模擬-usestate)
     - [模擬 useMemo](#模擬-usememo)
     - [模擬 useCallback](#模擬-usecallback)
+    - [模擬 useRef](#模擬-useref)
 
 # mini-react
 
@@ -3209,4 +3210,68 @@ export function useCallback<T extends Function>(
 
   return callback;
 }
+```
+
+### 模擬 useRef
+
+```tsx
+function Comp() {
+  const addClick = () => {
+    ref.current += 1;
+    alert("ref current = ", ref.current);
+  };
+
+  return (
+    <div>
+      <button onClick={addClick}>{count1}</button>
+    </div>
+  );
+}
+```
+
+> react-reconciler/src/ReactFiberHooks.ts
+
+```ts
+export function useRef<T>(data: T): { current: T } {
+  const hook: Hook = updateWorkInProgressHook();
+  // 初次掛載
+  if (currentHook === null) {
+    hook.memorizedState = { current: data };
+  }
+  return hook.memorizedState;
+}
+```
+
+日常應用
+
+```ts
+const useInterval = (
+  fn: () => void,
+  delay?: number,
+  options: {
+    immediate?: boolean;
+  } = {}
+) => {
+  const timerCallback = useCallback(fn, []);
+  const timerRef = useRef(null);
+
+  const clear = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isNumber(delay) || delay < 0) {
+      return;
+    }
+    if (options.immediate) {
+      timerCallback();
+    }
+    timerRef.current = setInterval(timerCallback, delay);
+    return clear;
+  }, [delay, options.immediate]);
+
+  return clear;
+};
 ```
