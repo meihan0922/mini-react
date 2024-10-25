@@ -1,7 +1,13 @@
 import { isHost } from "./ReactFiberCompleteWork";
-import { ChildDeletion, Placement } from "./ReactFiberFlags";
+import { ChildDeletion, Passive, Placement, Update } from "./ReactFiberFlags";
+import { HookFlags, HookLayout, HookPassive } from "./ReactHookEffectTags";
 import type { Fiber, FiberRoot } from "./ReactInternalTypes";
-import { HostComponent, HostRoot, HostText } from "./ReactWorkTags";
+import {
+  FunctionComponent,
+  HostComponent,
+  HostRoot,
+  HostText,
+} from "./ReactWorkTags";
 
 // finishedWork 是 HostRoot 類型的 fiber，要把子節點渲染到 root 裡面，root 是 #root
 export function commitMutationEffects(root: FiberRoot, finishedWork: Fiber) {
@@ -40,6 +46,14 @@ function commitReconciliationEffects(finishedWork: Fiber) {
     // 把 ChildDeletion 從 flags 移除
     finishedWork.flags &= ~ChildDeletion;
     finishedWork.deletions = null;
+  }
+  // 有標記更新的話(useLayoutEffect 會標記 Update)
+  if (flags & Update) {
+    // 只有函式組件才會有 useEffect
+    if (finishedWork.tag === FunctionComponent) {
+      // useLayoutEffect 同步變更執行，有可能會造成堵塞，有性能問題
+      commitHookEffectListMount(HookLayout, finishedWork);
+    }
   }
 }
 
@@ -153,4 +167,52 @@ function getHostParentFiber(fiber: Fiber) {
 
 function isHostParent(fiber: Fiber) {
   return fiber.tag === HostComponent || fiber.tag === HostRoot;
+}
+
+export function flushPassiveEffect(finishedWork: Fiber) {
+  // 遍歷子節點，檢查子節點自己的 effect
+  recursivelyTraversePassiveMountEffects(finishedWork);
+  // 如果有 passive effect 執行
+  commitPassiveEffects(finishedWork);
+}
+
+function recursivelyTraversePassiveMountEffects(finishedWork: Fiber) {
+  let child = finishedWork.child;
+  while (child !== null) {
+    recursivelyTraversePassiveMountEffects(child);
+    // 如果有 passive effect 執行
+    commitPassiveEffects(finishedWork);
+    child = child.sibling;
+  }
+}
+
+function commitPassiveEffects(finishedWork: Fiber) {
+  switch (finishedWork.tag) {
+    case FunctionComponent: {
+      if (finishedWork.flags & Passive) {
+        commitHookEffectListMount(HookPassive, finishedWork);
+        finishedWork.flags &= ~Passive;
+      }
+      break;
+    }
+  }
+}
+
+function commitHookEffectListMount(hookFlags: HookFlags, finishedWork: Fiber) {
+  const updateQueue = finishedWork.updateQueue;
+  let lastEffect = updateQueue!.lastEffect;
+  // 遍歷單向循環鏈表，前提是鏈表存在
+  if (lastEffect !== null) {
+    const firstEffect = lastEffect.next;
+    let effect = firstEffect;
+    do {
+      if ((effect.tag & hookFlags) === hookFlags) {
+        const create = effect.create;
+        // TODO: effect.destroy()
+        // 執行 effect 內容
+        create();
+      }
+      effect = effect.next;
+    } while (effect !== firstEffect);
+  }
 }

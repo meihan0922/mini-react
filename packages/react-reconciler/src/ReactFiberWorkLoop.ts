@@ -1,6 +1,13 @@
+import {
+  NormalPriority,
+  scheduleCallback,
+} from "@mono/scheduler/src/Scheduler";
 import { createWorkInProgress } from "./ReactFiber";
 import { beginWork } from "./ReactFiberBeginWork";
-import { commitMutationEffects } from "./ReactFiberCommitWork";
+import {
+  commitMutationEffects,
+  flushPassiveEffect,
+} from "./ReactFiberCommitWork";
 import { completeWork } from "./ReactFiberCompleteWork";
 import { ensureRootIsScheduled } from "./ReactFiberRootScheduler";
 import type { Fiber, FiberRoot } from "./ReactInternalTypes";
@@ -50,10 +57,15 @@ function commitRoot(root: FiberRoot) {
   // ! 1. commit 階段開始
   const prevExecutionContext = executionContext;
   executionContext |= CommitContext;
-  // ! 2. mutation 階段，渲染 DOM 樹
-  commitMutationEffects(root, root.finishedWork);
-
-  // ! 4. commit 結束，把數據還原
+  // ! 2.1 2.1 mutation 階段，遍歷 fiber，渲染 DOM 樹
+  // useLayoutEffect 也應當在這個階段執行
+  commitMutationEffects(root, root.finishedWork as Fiber);
+  // ! 2.2 passive effect 階段，執行 passive effect 階段
+  // 這也是為什麼 useEffect 延遲調用的原因
+  scheduleCallback(NormalPriority, () => {
+    flushPassiveEffect(root.finishedWork as Fiber);
+  });
+  // ! 3. commit 結束，把數據還原
   executionContext = prevExecutionContext;
   workInProgressRoot = null;
 }

@@ -56,6 +56,8 @@ function FiberNode(tag: WorkTag, pendingProps: unknown, key: string | null) {
   // 不同組件指向不同，函數組件 -> hook0; 類組件 -> state
   this.memoizedState = null;
   this.pendingProps = pendingProps;
+
+  this.updateQueue = null;
 }
 
 // 創造 WorkInProgress 樹

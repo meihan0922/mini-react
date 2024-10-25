@@ -45,6 +45,12 @@
     - [模擬 useMemo](#模擬-usememo)
     - [模擬 useCallback](#模擬-usecallback)
     - [模擬 useRef](#模擬-useref)
+    - [模擬 useLayoutEffect, useEffect](#模擬-uselayouteffect-useeffect)
+      - [effect 結構](#effect-結構)
+      - [初始化 updateQueue、建立 effect 鏈表](#初始化-updatequeue建立-effect-鏈表)
+      - [執行 effect](#執行-effect)
+        - [mutation 階段，遍歷 fiber，渲染 DOM 樹時，順便處理 useLayoutEffect](#mutation-階段遍歷-fiber渲染-dom-樹時順便處理-uselayouteffect)
+        - [處理延遲的 effect，要再次遍歷 fiber，找到身上 tags 有掛載 Passive 的 effect 執行](#處理延遲的-effect要再次遍歷-fiber找到身上-tags-有掛載-passive-的-effect-執行)
 
 # mini-react
 
@@ -3275,3 +3281,276 @@ const useInterval = (
   return clear;
 };
 ```
+
+### 模擬 useLayoutEffect, useEffect
+
+- useLayoutEffect
+
+和 `useEffect` 相同，但在所有的 DOM 變更之後**同步**調用 effect。可以用它來讀取佈局並同步觸發重渲染。在瀏覽器繪製之前，`useLayoutEffect`內部的更新計畫將被同步刷新。
+盡量避免使用以防止阻塞渲染，延後螢幕加載。
+
+- useEffect
+
+從 react 純函式中通往命令式的逃生通道。會在渲染之後**延遲**執行。 專門針對副作用的操作，比方改變 DOM、添加訂閱、計時器設置、紀錄日誌等等。
+
+```tsx
+const [count, setCount] = useReducer((x) => x + 1, 0);
+useEffect(() => {
+  console.log("useEffect");
+}, []);
+
+useLayoutEffect(() => {
+  console.log("useLayoutEffect");
+}, [count]);
+```
+
+#### effect 結構
+
+首先知道 effect 是掛載在 fiber 的 updateQueue 上面，而且他的結構是長這樣
+
+```ts
+type Effect = {
+  tag: HookFlags; // 標記 Hook 類型
+  create: () => (() => void) | void;
+  deps: Array<any> | void | null; // 依賴項
+  next: null | Effect; // 指向下一個 effect，是單向循環鏈表
+};
+
+// > react-reconciler/src/ReactHookEffectTags.ts
+export type HookFlags = number;
+export const HookNoFlags = /*   */ 0b0000;
+
+// Represents whether effect should fire.
+export const HookHasEffect = /* */ 0b0001;
+
+// Represents the phase in which the effect (not the clean-up) fires.
+export const HookInsertion = /* */ 0b0010;
+export const HookLayout = /*    */ 0b0100;
+export const HookPassive = /*   */ 0b1000;
+```
+
+fiber tag 上面也會做記號
+
+```ts
+// useLayoutEffect
+export const Update = /*                       */ 0b0000000000000000000000000100;
+// useEffect 標記的延遲
+export const Passive = /*                      */ 0b0000000000000000100000000000; // 2048
+```
+
+依賴項會掛載在 memorizedState。處理是否有更新就和上面 useCallback 相同。call `areHookInputEqual。`
+
+#### 初始化 updateQueue、建立 effect 鏈表
+
+在 `renderWithHook` 時需要初始化 updateQueue
+
+```ts
+export function renderWithHook(
+  current: Fiber | null,
+  workInProgress: Fiber,
+  component: any,
+  props: any
+) {
+  // 省略
+  workInProgress.updateQueue = null;
+  // 省略
+}
+```
+
+基本上 `useLayoutEffect`、`useEffect` 是做一樣的事情，只是執行的時機點不同！
+在執行之前要先在 fiber 上面標記，並且做好 effect 鏈表。
+
+> react-reconciler/src/ReactFiberHooks.ts
+
+```ts
+export function useLayoutEffect(
+  create: () => (() => void) | void,
+  deps: Array<any> | void | null
+) {
+  return updateEffectImpl(Update, HookLayout, create, deps);
+}
+
+export function useEffect(
+  create: () => (() => void) | void,
+  deps: Array<any> | void | null
+) {
+  return updateEffectImpl(Passive, HookPassive, create, deps);
+}
+
+function updateEffectImpl(
+  fibrFlags: Flags,
+  hookFlags: HookFlags,
+  create: () => (() => void) | void,
+  deps: Array<any> | void | null
+) {
+  const hook = updateWorkInProgressHook();
+  // 依賴項是否發生變化
+  const nextDeps = deps === undefined ? null : deps;
+  // 組件是否在更新階段
+  if (currentHook !== null) {
+    if (nextDeps !== null) {
+      const prevDeps = currentHook.memorizedState.deps;
+      if (areHookInputEqual(nextDeps, prevDeps)) {
+        return;
+      }
+    }
+  }
+
+  currentlyRenderingFiber!.flags |= fibrFlags;
+  // 1. 保存 Effect
+  // 2. 構建 effect 鏈表
+  hook.memorizedState = pushEffect(hookFlags, create, deps);
+}
+
+function pushEffect(
+  hookFlags: HookFlags,
+  create: () => (() => void) | void,
+  deps: Array<any> | void | null
+) {
+  const effect: Effect = {
+    tag: hookFlags,
+    create,
+    deps,
+    next: null,
+  };
+  let componentUpdateQueue = currentlyRenderingFiber!.updateQueue;
+
+  // effect 是單向循環鍊錶
+  // 第一個effect
+  if (componentUpdateQueue === null) {
+    componentUpdateQueue = {
+      lastEffect: null,
+    };
+    currentlyRenderingFiber!.updateQueue = componentUpdateQueue;
+    componentUpdateQueue.lastEffect = effect.next = effect;
+  } else {
+    // 剪開循環鏈表再接起來
+    const lastEffect = componentUpdateQueue.lastEffect;
+    const firstEffect = lastEffect.next;
+    lastEffect.next = effect;
+    effect.next = firstEffect;
+    componentUpdateQueue.lastEffect = effect;
+  }
+
+  return effect;
+}
+```
+
+完成鏈表創建後，真正要執行的時機就不一樣了！
+
+#### 執行 effect
+
+- **`useLayoutEffect` 是在 commit 階段執行的**
+- **`useEffect`是延後執行，要怎麼延後？利用 scheduleCallback，排隊等待調度！**
+
+> react-reconciler/src/ReactFiberWorkLoop.ts
+
+```ts
+function commitRoot(root: FiberRoot) {
+  // ! 1. commit 階段開始
+  const prevExecutionContext = executionContext;
+  executionContext |= CommitContext;
+  // ! 2.1 mutation 階段，遍歷 fiber，渲染 DOM 樹
+  // useLayoutEffect 也應當在這個階段執行
+  commitMutationEffects(root, root.finishedWork as Fiber);
+  // ! 2.2 passive effect 階段，執行 passive effect 階段
+  // 這也是為什麼 useEffect 延遲調用的原因
+  scheduleCallback(NormalPriority, () => {
+    flushPassiveEffect(root.finishedWork as Fiber);
+  });
+  // ! 3. commit 結束，把數據還原
+  executionContext = prevExecutionContext;
+  workInProgressRoot = null;
+}
+```
+
+##### mutation 階段，遍歷 fiber，渲染 DOM 樹時，順便處理 useLayoutEffect
+
+> react-reconciler/src/ReactFiberCommitWork.ts
+
+```ts
+// finishedWork 是 HostRoot 類型的 fiber，要把子節點渲染到 root 裡面，root 是 #root
+export function commitMutationEffects(root: FiberRoot, finishedWork: Fiber) {
+  recursivelyTraverseMutationEffects(root, finishedWork);
+  commitReconciliationEffects(finishedWork);
+}
+// 遍歷 finishedWork
+function recursivelyTraverseMutationEffects(root, parentFiber: Fiber) {
+  // 單鏈表
+  let child = parentFiber.child;
+  while (child !== null) {
+    // 每個子節點都一一提交，包含同級的兄弟節點，逐一往上
+    commitMutationEffects(root, child);
+    child = child.sibling;
+  }
+}
+// 提交協調中產生的effects，比如flags標記 Placement, Update, ChildDeletion
+function commitReconciliationEffects(finishedWork: Fiber) {
+  // 省略
+
+  // 有標記更新的話(useLayoutEffect 會標記 Update)
+  if (flags & Update) {
+    // 只有函式組件才會有 useEffect
+    if (finishedWork.tag === FunctionComponent) {
+      // useLayoutEffect 同步變更執行，有可能會造成堵塞，有性能問題
+      commitHookEffectListMount(HookLayout, finishedWork);
+    }
+  }
+}
+
+function commitHookEffectListMount(hookFlags: HookFlags, finishedWork: Fiber) {
+  const updateQueue = finishedWork.updateQueue;
+  let lastEffect = updateQueue!.lastEffect;
+  // 遍歷單向循環鏈表，前提是鏈表存在
+  if (lastEffect !== null) {
+    const firstEffect = lastEffect.next;
+    let effect = firstEffect;
+    do {
+      if ((effect.tag & hookFlags) === hookFlags) {
+        const create = effect.create;
+        // TODO: effect.destroy()
+        // 執行 effect 內容
+        create();
+      }
+      effect = effect.next;
+    } while (effect !== firstEffect);
+  }
+}
+```
+
+這樣算是完成 `useLayoutEffect`
+
+##### 處理延遲的 effect，要再次遍歷 fiber，找到身上 tags 有掛載 Passive 的 effect 執行
+
+```ts
+export function flushPassiveEffect(finishedWork: Fiber) {
+  // 遍歷子節點，檢查子節點自己的 effect
+  recursivelyTraversePassiveMountEffects(finishedWork);
+  // 如果有 passive effect 執行
+  commitPassiveEffects(finishedWork);
+}
+
+function recursivelyTraversePassiveMountEffects(finishedWork: Fiber) {
+  let child = finishedWork.child;
+  while (child !== null) {
+    recursivelyTraversePassiveMountEffects(child);
+    // 如果有 passive effect 執行
+    commitPassiveEffects(finishedWork);
+    child = child.sibling;
+  }
+}
+
+function commitPassiveEffects(finishedWork: Fiber) {
+  switch (finishedWork.tag) {
+    case FunctionComponent: {
+      if (finishedWork.flags & Passive) {
+        commitHookEffectListMount(HookPassive, finishedWork);
+        finishedWork.flags &= ~Passive;
+      }
+      break;
+    }
+  }
+}
+```
+
+到此，effect 已經簡單的處理完成了。

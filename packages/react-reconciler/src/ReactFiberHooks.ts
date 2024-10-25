@@ -2,10 +2,18 @@ import { isFn } from "@mono/shared/utils";
 import { scheduleUpdateOnFiber } from "./ReactFiberWorkLoop";
 import type { Fiber, FiberRoot } from "./ReactInternalTypes";
 import { HostRoot } from "./ReactWorkTags";
+import { Flags, Passive, Update } from "./ReactFiberFlags";
+import { HookFlags, HookLayout, HookPassive } from "./ReactHookEffectTags";
 
 type Hook = {
   memorizedState: any;
   next: null | Hook;
+};
+type Effect = {
+  tag: HookFlags;
+  create: () => (() => void) | void;
+  deps: Array<any> | void | null;
+  next: null | Effect;
 };
 let currentlyRenderingFiber: Fiber | null = null;
 let workInProgressHook: Hook | null = null;
@@ -19,6 +27,7 @@ export function renderWithHook(
 ) {
   currentlyRenderingFiber = workInProgress;
   workInProgress.memoizedState = null;
+  workInProgress.updateQueue = null;
   let children = component(props);
 
   finishRenderingHooks();
@@ -196,4 +205,78 @@ export function useRef<T>(data: T): { current: T } {
     hook.memorizedState = { current: data };
   }
   return hook.memorizedState;
+}
+
+// 和useEffect存儲的結構一樣
+export function useLayoutEffect(
+  create: () => (() => void) | void,
+  deps: Array<any> | void | null
+) {
+  return updateEffectImpl(Update, HookLayout, create, deps);
+}
+
+export function useEffect(
+  create: () => (() => void) | void,
+  deps: Array<any> | void | null
+) {
+  return updateEffectImpl(Passive, HookPassive, create, deps);
+}
+
+// useEffect: passive Effect
+function updateEffectImpl(
+  fibrFlags: Flags,
+  hookFlags: HookFlags,
+  create: () => (() => void) | void,
+  deps: Array<any> | void | null
+) {
+  const hook = updateWorkInProgressHook();
+  // 依賴項是否發生變化
+  const nextDeps = deps === undefined ? null : deps;
+  // 組件是否在更新階段
+  if (currentHook !== null) {
+    if (nextDeps !== null) {
+      const prevDeps = currentHook.memorizedState.deps;
+      if (areHookInputEqual(nextDeps, prevDeps)) {
+        return;
+      }
+    }
+  }
+
+  currentlyRenderingFiber!.flags |= fibrFlags;
+  // 1. 保存 Effect
+  // 2. 構建 effect 鏈表
+  hook.memorizedState = pushEffect(hookFlags, create, deps);
+}
+
+function pushEffect(
+  hookFlags: HookFlags,
+  create: () => (() => void) | void,
+  deps: Array<any> | void | null
+) {
+  const effect: Effect = {
+    tag: hookFlags,
+    create,
+    deps,
+    next: null,
+  };
+  let componentUpdateQueue = currentlyRenderingFiber!.updateQueue;
+
+  // effect 是單向循環鍊錶
+  // 第一個effect
+  if (componentUpdateQueue === null) {
+    componentUpdateQueue = {
+      lastEffect: null,
+    };
+    currentlyRenderingFiber!.updateQueue = componentUpdateQueue;
+    componentUpdateQueue.lastEffect = effect.next = effect;
+  } else {
+    // 剪開循環鏈表再接起來
+    const lastEffect = componentUpdateQueue.lastEffect;
+    const firstEffect = lastEffect.next;
+    lastEffect.next = effect;
+    effect.next = firstEffect;
+    componentUpdateQueue.lastEffect = effect;
+  }
+
+  return effect;
 }
