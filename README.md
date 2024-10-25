@@ -51,6 +51,7 @@
       - [執行 effect](#執行-effect)
         - [mutation 階段，遍歷 fiber，渲染 DOM 樹時，順便處理 useLayoutEffect](#mutation-階段遍歷-fiber渲染-dom-樹時順便處理-uselayouteffect)
         - [處理延遲的 effect，要再次遍歷 fiber，找到身上 tags 有掛載 Passive 的 effect 執行](#處理延遲的-effect要再次遍歷-fiber找到身上-tags-有掛載-passive-的-effect-執行)
+  - [Context](#context)
 
 # mini-react
 
@@ -3554,3 +3555,65 @@ function commitPassiveEffects(finishedWork: Fiber) {
 ```
 
 到此，effect 已經簡單的處理完成了。
+
+## Context
+
+- 使用時機：當父組件想要和後代組件要跨層級溝通。
+- 使用方式：
+  1. 創建 Context 對象：可以設置預設值，如果缺少匹配的 Provider 後代組件將會讀取這裡的默認值。
+  2. Provider 傳遞值給後代組件，。
+  3. 後代組件消費 value，會一直往上找到**最近也匹配的** Provider:
+     1. contextType: 只能用在 _類組件_，且只能訂閱單一的 context 來源 (這個值名稱不能更動)
+     2. useContext: 只能用在 _函式組件_ 或是 _自定義的 Hook 中_
+     3. Consumer 組件: 無限制
+
+```tsx
+// 1. 創建 context
+const CountContext = createContext(0);
+
+const Child = () => {
+  console.log("child");
+  // 3-2. 後代組件消費 value
+  const count = useContext(CountContext);
+  return (
+    <div>
+      <h1>{count}</h1>
+      {/* 3-3. 後代組件消費 */}
+      <CountContext.Consumer>{(value) => <p>{value}</p>}</CountContext.Consumer>
+    </div>
+  );
+};
+class ClassChild extends Component {
+  // 3-1. 後代組件消費 value，這個名稱不能更動，只能消費單一的來源
+  static contextType = CountContext;
+  render() {
+    return <div>類組件{this.context as number}</div>;
+  }
+}
+
+function Comp() {
+  const [count, setCount] = useReducer((x) => x + 1, 0);
+  useEffect(() => {
+    console.log("useEffect");
+  }, []);
+
+  useLayoutEffect(() => {
+    console.log("useLayoutEffect");
+  }, [count]);
+
+  return (
+    // 2. 創建 Provider 組件，對後代對象組件進行傳遞 value
+    <CountContext.Provider value={count}>
+      <button
+        onClick={() => {
+          setCount();
+        }}
+      >
+        {count}
+      </button>
+      <Child />
+      <ClassChild />
+    </CountContext.Provider>
+  );
+}
+```
