@@ -57,6 +57,7 @@
       - [創建 context](#創建-context)
       - [beginWork 處理 ](#beginwork-處理-)
     - [Consumer](#consumer)
+    - [Class Component context](#class-component-context)
 
 # mini-react
 
@@ -4034,3 +4035,56 @@ function Comp() {
   );
 }
 ```
+
+### Class Component context
+
+```tsx
+class ClassChild extends Component {
+  // 規定寫法
+  static contextType = CountContext;
+  render() {
+    return <div>{this.context as number}</div>;
+  }
+}
+```
+
+增加 class 類別上的 context 屬性
+
+> react/src/ReactBaseClasses.ts
+
+```ts
+export function Component(props: any, context: any) {
+  this.props = props;
+  // 要想辦法把 contextType 的值 賦給 context
+  // 而且在 render() 執行之前
+  // ---> beginWork!
+  this.context = context;
+}
+
+Component.prototype.isReactComponent = {};
+```
+
+> react-reconciler/src/ReactFiberBeginWork.ts
+
+```ts
+function updateClassComponent(current: Fiber | null, workInProgress: Fiber) {
+  // 實例在 type 上
+  const { type, pendingProps } = workInProgress;
+  const context = type.contextType;
+  const newValue = readContext(context);
+  let instance = current?.stateNode;
+  if (current === null) {
+    // 實例在 type 上
+    instance = new type(pendingProps);
+    workInProgress.stateNode = instance;
+  }
+  // 賦給 context
+  instance.context = newValue;
+  // 調用 render 創造節點
+  const children = instance.render();
+  reconcileChildren(current, workInProgress, children);
+  return workInProgress.child;
+}
+```
+
+現在就可以實現 class component 使用 context 的情境。

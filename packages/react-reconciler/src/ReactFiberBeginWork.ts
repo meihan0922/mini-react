@@ -85,9 +85,17 @@ function updateContextProvider(current: Fiber | null, workInProgress: Fiber) {
 }
 
 function updateClassComponent(current: Fiber | null, workInProgress: Fiber) {
-  const { type, pendingProps } = workInProgress;
   // 實例在 type 上
-  const instance = new type(pendingProps);
+  const { type, pendingProps } = workInProgress;
+  const context = type.contextType;
+  const newValue = readContext(context);
+  let instance = current?.stateNode;
+  if (current === null) {
+    // 實例在 type 上
+    instance = new type(pendingProps);
+    workInProgress.stateNode = instance;
+  }
+  instance.context = newValue;
   // 調用 render 創造節點
   const children = instance.render();
   reconcileChildren(current, workInProgress, children);
@@ -123,7 +131,7 @@ function updateHostRoot(current: Fiber | null, workInProgress: Fiber) {
   return workInProgress.child;
 }
 // 原生標籤，ex: div, span。初次渲染會進入協調，更新則可能是協調或是 bailout
-// TODO: 更新
+// TODO: 更新 之後要寫 props 比對
 function updateHostComponent(current: Fiber | null, workInProgress: Fiber) {
   const { type, pendingProps } = workInProgress;
   // 如果原生標籤只有一個文本，這個時候文本不會再生成 fiber 節點，而是會變成原生標籤的屬性

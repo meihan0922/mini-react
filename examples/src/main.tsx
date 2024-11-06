@@ -42,7 +42,7 @@ class ClassChild extends Component {
   // 3-1. 後代組件消費 value，這個名稱不能更 動，只能消費單一的來源
   static contextType = CountContext;
   render() {
-    return <div>類組件{this.context as number}</div>;
+    return <div>{this.context as number}</div>;
   }
 }
 
@@ -52,20 +52,21 @@ function Comp() {
   return (
     // 2. 創建 Provider 組件，對後代對象組件進行傳遞 value
     <div>
+      <button
+        onClick={() => {
+          setCount();
+        }}
+      >
+        add
+      </button>
       <CountContext.Provider value={count}>
-        <ColorContext.Provider value="green">
+        <ClassChild />
+        {/* <ColorContext.Provider value="green">
           <CountContext.Provider value={count + 1}>
-            <button
-              onClick={() => {
-                setCount();
-              }}
-            >
-              add
-            </button>
             <Child />
           </CountContext.Provider>
         </ColorContext.Provider>
-        <Child />
+        <Child /> */}
       </CountContext.Provider>
     </div>
   );
