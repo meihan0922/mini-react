@@ -8,7 +8,9 @@ import {
   Fragment,
   ClassComponent,
   FunctionComponent,
+  ContextProvider,
 } from "./ReactWorkTags";
+import { pushProvider } from "./ReactFiberNewContext";
 import { shouldSetTextContent } from "@mono/react-dom/client/ReactDOMHostConfig";
 // 處理當前的節點，因應不同節點做不同的處理
 // 返回子節點
@@ -30,9 +32,42 @@ export function beginWork(
       return updateClassComponent(current, workInProgress);
     case FunctionComponent:
       return updateFunctionComponent(current, workInProgress);
+    case ContextProvider:
+      return updateContextProvider(current, workInProgress);
   }
   // TODO:
   throw new Error(`beginWork 有標籤沒有處理到 - ${workInProgress.tag}`);
+}
+
+function updateContextProvider(current: Fiber | null, workInProgress: Fiber) {
+  // 需要紀錄context, value 讓後代可以消費
+  // 用 stack 結構儲存，因為有先進後出的特點
+  // 只能在棧頂操作，比方[0,100,200]，對200操作是效能比較好的
+  // 1. 先記錄，push到棧堆當中
+  // 2. 後代組件消費
+  // 3. 消費完要出棧，避免取到一樣的值
+  /**
+   * ex:
+   *  <CountContext.Provider value={count}>
+   *    <CountContext.Provider value={count + 1}>
+   *       ! 使用前，在 beginWork 要加入 [countContext, count+1Context]
+   *       <Child />
+   *       ! 使用後，使用完，在 completeWork 要刪除 [countContext]
+   *    </CountContext.Provider>
+   *     <Child /> // 處理到他的時候，應該要只剩下 [countContext]
+   *  </CountContext.Provider>
+   */
+  const context = workInProgress.type._context;
+  const value = workInProgress.pendingProps.value;
+  pushProvider(context, value);
+
+  reconcileChildren(
+    current,
+    workInProgress,
+    workInProgress.pendingProps.children
+  );
+
+  return workInProgress.child;
 }
 
 function updateClassComponent(current: Fiber | null, workInProgress: Fiber) {

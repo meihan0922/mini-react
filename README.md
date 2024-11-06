@@ -52,6 +52,10 @@
         - [mutation 階段，遍歷 fiber，渲染 DOM 樹時，順便處理 useLayoutEffect](#mutation-階段遍歷-fiber渲染-dom-樹時順便處理-uselayouteffect)
         - [處理延遲的 effect，要再次遍歷 fiber，找到身上 tags 有掛載 Passive 的 effect 執行](#處理延遲的-effect要再次遍歷-fiber找到身上-tags-有掛載-passive-的-effect-執行)
   - [Context](#context)
+    - [模擬 context](#模擬-context)
+      - [結構](#結構)
+      - [創建 context](#創建-context)
+      - [beginWork 處理 ](#beginwork-處理-)
 
 # mini-react
 
@@ -3570,6 +3574,7 @@ function commitPassiveEffects(finishedWork: Fiber) {
 ```tsx
 // 1. 創建 context
 const CountContext = createContext(0);
+const ColorContext = createContext("red");
 
 const Child = () => {
   console.log("child");
@@ -3583,13 +3588,6 @@ const Child = () => {
     </div>
   );
 };
-class ClassChild extends Component {
-  // 3-1. 後代組件消費 value，這個名稱不能更動，只能消費單一的來源
-  static contextType = CountContext;
-  render() {
-    return <div>類組件{this.context as number}</div>;
-  }
-}
 
 function Comp() {
   const [count, setCount] = useReducer((x) => x + 1, 0);
@@ -3603,17 +3601,271 @@ function Comp() {
 
   return (
     // 2. 創建 Provider 組件，對後代對象組件進行傳遞 value
-    <CountContext.Provider value={count}>
-      <button
-        onClick={() => {
-          setCount();
-        }}
-      >
-        {count}
-      </button>
-      <Child />
-      <ClassChild />
-    </CountContext.Provider>
+    <div>
+      <CountContext.Provider value={count}>
+        <ColorContext.Provider value="green">
+          <CountContext.Provider value={count + 1}>
+            <button onClick={() => setCount()}>add</button>
+            <Child />
+          </CountContext.Provider>
+        </ColorContext.Provider>
+        <Child />
+      </CountContext.Provider>
+    </div>
   );
 }
 ```
+
+### 模擬 context
+
+#### 結構
+
+```ts
+export type ReactConsumerType<T> = {
+  $$typeof: symbol | number;
+  _context: ReactContext<T>;
+};
+
+export type ReactProviderType<T> = {
+  $$typeof: symbol | number;
+  type: ReactConsumerType<T>;
+  key: null | string;
+  ref: null;
+  props: {
+    children: (value: T) => ReactNodeList;
+  };
+};
+
+export type ReactContext<T> = {
+  $$typeof: symbol | number;
+  Consumer: ReactContext<T>;
+  Provider: ReactProviderType<T>;
+  _currentValue: T; // 默認值
+};
+```
+
+#### 創建 context
+
+> packages/react/src/ReactContext.ts
+
+```ts
+import type { ReactContext } from "@mono/shared/ReactTypes";
+import {
+  REACT_CONTEXT_TYPE,
+  REACT_PROVIDER_TYPE,
+} from "@mono/shared/ReactSymbols";
+
+export function createContext<T>(defaultValue: T): ReactContext<T> {
+  const context: ReactContext<T> = {
+    $$typeof: REACT_CONTEXT_TYPE,
+    _currentValue: defaultValue,
+    Provider: null,
+    Consumer: null,
+  };
+  // TODO: Provider Consumer
+  // 指定了 react element - provider element的 type
+  context.Provider = {
+    $$typeof: REACT_PROVIDER_TYPE,
+    _context: context,
+  };
+  return context;
+}
+```
+
+後續處理 child 時，會走到 `createFiberFromTypeAndProps` 按照不同的 type 創造出不同的 fiber
+
+> react-reconciler/src/ReactFiber.ts
+
+```ts
+export function createFiberFromTypeAndProps(
+  type: any,
+  key: null | string,
+  pendingProps: any,
+  lanes: Lanes = NoLanes
+): Fiber {
+  // 是組件！
+  let fiberTag: WorkTag = IndeterminateComponent;
+  if (isFn(type)) {
+    // 省略
+  } else if (isStr(type)) {
+    // 如果是原生標籤
+    // 省略
+  } else if (type === REACT_FRAGMENT_TYPE) {
+    // 省略
+  } else if (type.$$typeof === REACT_PROVIDER_TYPE) {
+    // 幫他加上 tag 之後辨認用
+    fiberTag = ContextProvider;
+  }
+
+  const fiber = createFiber(fiberTag, pendingProps, key);
+  fiber.elementType = type;
+  fiber.type = type;
+  fiber.lanes = lanes;
+
+  return fiber;
+}
+```
+
+#### beginWork 處理 <Provider>
+
+考慮到所有的 context 都有初始值(createContext(defaultVal))，而 context 又有可以被重複使用的特性。在執行的順序會只讀取到最近的那個 context value，所以必須在製作 fiber 階段先儲存起來(context.\_currentValue 也指向最新的值），供後代消費，在使用完成(Child 已經執行完畢) completeWork 時，刪除，避免重複讀取。
+
+- 概念：
+  - stack 裝 Context.Provider 上 context.\_currentValue 的初始值。
+  - 指針保留最後一個的 context.\_currentValue 值，再遇到下個 context 時才會放入 stack。
+  - 更新 context.\_currentValue 成 props 上 value 的樣子。可以確保 useContext 在調用 context 時會拿到最新的值。
+  - 彈出時，指針因為保留了上一個 context 的值，只要再還原給 context 就好，並且把指針指向到再上一個 context 值（也就是 stack[index])。
+
+比方說，兩個 context，使用三次
+
+```ts
+const CountContext = createContext(0);
+const ColorContext = createContext("red");
+```
+
+```tsx
+function Comp() {
+  const [count, setCount] = useReducer((x) => x + 1, 1);
+
+  return (
+    // 2. 創建 Provider 組件，對後代對象組件進行傳遞 value
+    <div>
+      <CountContext.Provider value={count}>
+        <ColorContext.Provider value="green">
+          <CountContext.Provider value={count + 1}>
+            <button
+              onClick={() => {
+                setCount();
+              }}
+            >
+              add
+            </button>
+            <Child /> // A.
+          </CountContext.Provider>
+        </ColorContext.Provider>
+        <Child /> // B.
+      </CountContext.Provider>
+    </div>
+  );
+}
+```
+
+- beginWork 時，
+
+  - 指針目前指向 null ，存進 stack 當中，先紀錄上 valueStack：[null]，再更新指針指向-> context.\_currentValue ：0。更新掛載在 fiber 上的 context.\_currentValue，設成 props 上的 value：1。
+  - 指針目前指向的上一次的值 0 ，存進 stack 當中，valueStack：[null, 0]，再更新指針指向-> context.\_currentValue ："red"，更新掛載在 fiber 上的 context.\_currentValue，設成 props 上的 value："green"。
+  - 指針指向的上一次的值 "red" ，存進 stack 當中，valueStack：[null, 0, "red"]，再更新指針指向-> context.\_currentValue ：1，更新掛載在 fiber 上的 context.\_currentValue，設成 props 上的 value："2"。
+
+- 子元件使用時，<Child /> 在呼叫時，useContext 讀到的 context.\_currentValue -> 2。
+
+- completeWork 時，
+
+  - </CountContext.Provider> 指針指向的是保留下來尚未更新 props 的 1，設定 currentValue 保存 1。更新指針指向上一個 stack 的保留值 - "red"。stack 對應位置設定成 null。context.\_currentValue 指向 currentValue - 1。
+  - </ColorContext.Provider> 指針指向的是保留下來尚未更新 props 的 "red"，設定 currentValue 保存 "red"。更新指針指向上一個 stack 的保留值 - "0"。stack 對應位置設定成 null。context.\_currentValue 指向 currentValue - "red"。
+
+- 子元件使用時，<Child /> 在呼叫時，useContext 讀到的 context.\_currentValue - 1。
+
+- completeWork 時，
+  - </CountContext.Provider> 指針指向的是保留下來尚未更新 props 的 0，設定 currentValue 保存 0。更新指針指向上一個 stack 的保留值 - null。stack 對應位置設定成 null。
+
+```ts
+export function beginWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  switch (workInProgress.tag) {
+    // 省略
+    case ContextProvider:
+      return updateContextProvider(current, workInProgress);
+  }
+  // 省略
+}
+```
+
+```ts
+function updateContextProvider(current: Fiber | null, workInProgress: Fiber) {
+  // 在 createContext 中，被記到 Provider 上
+  const context = workInProgress.type._context;
+  // 放在 <CountContext.Provider value={count + 1}>
+  const value = workInProgress.pendingProps.value;
+  // 創造一個 stack 依照順序放入 context
+  // 創造一個指針指向最尾巴 棧頂的 context value
+  // 把 Provider 的 context 指向 value
+  // 並且把它存入堆中
+  pushProvider(context, value);
+
+  reconcileChildren(
+    current,
+    workInProgress,
+    workInProgress.pendingProps.children
+  );
+  return workInProgress.child;
+}
+```
+
+先處理紀錄 context
+
+> packages/react-reconciler/src/ReactFiberNewContext.ts
+
+```ts
+import { ReactContext } from "@mono/shared/ReactTypes";
+import { createCursor, pop, push, StackCursor } from "./ReactFiberStack";
+
+// 紀錄棧尾元素
+const valueCursor: StackCursor<any> = createCursor(null);
+
+// 使用前，在 beginWork 要加入
+export function pushProvider<T>(context: ReactContext<T>, nextValue: T): void {
+  // 推入棧堆，把紀錄指針指到新值
+  push(valueCursor, context._currentValue);
+  // 把 context 上的值更新
+  context._currentValue = nextValue;
+}
+
+// 使用後，在 completeWork 要刪除
+export function popProvider<T>(context: ReactContext<T>): void {
+  // 紀錄下當前的值到 context 上，但此 context 已經彈出 stack
+  const currentValue = valueCursor.current;
+  pop(valueCursor);
+  // 後續其他相同 context 在讀取時
+  context._currentValue = currentValue;
+}
+
+// 後代組件消費
+export function readProvider<T>(context: ReactContext<T>) {
+  return context._currentValue;
+}
+```
+
+> react-reconciler/src/ReactFiberStack.ts
+
+```ts
+export type StackCursor<T> = { current: T };
+
+const valueStack: Array<any> = [];
+let index = -1;
+
+export function createCursor<T>(defaultValue: T): StackCursor<T> {
+  return { current: defaultValue };
+}
+
+export function push<T>(cursor: StackCursor<T>, value: T): void {
+  index++;
+  // 紀錄上一個棧尾元素
+  valueStack[index] = cursor.current;
+  // cursor.current 紀錄棧尾元素
+  cursor.current = value;
+}
+
+export function pop<T>(cursor: StackCursor<T>): void {
+  debugger;
+  if (index < 0) return;
+  // cursor.current 紀錄上一個棧尾元素
+  cursor.current = valueStack[index];
+  // 上一個棧尾元素 = null
+  valueStack[index] = null;
+  index--;
+}
+```
+
+小結：每一次更新 stack 都會放入 context 預設值，然後再還原。指針和 fiber 上的 context.\_currentValue 會紀錄保留和更新的值。

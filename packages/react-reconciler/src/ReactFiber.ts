@@ -1,8 +1,12 @@
 import { ReactElement, ReactFragment } from "../../shared/ReactTypes";
-import { REACT_FRAGMENT_TYPE } from "../../shared/ReactSymbols";
+import {
+  REACT_FRAGMENT_TYPE,
+  REACT_PROVIDER_TYPE,
+} from "../../shared/ReactSymbols";
 import { isFn, isStr } from "../../shared/utils";
 import {
   ClassComponent,
+  ContextProvider,
   Fragment,
   FunctionComponent,
   HostComponent,
@@ -128,7 +132,7 @@ export function createFiberFromTypeAndProps(
   let fiberTag: WorkTag = IndeterminateComponent;
   if (isFn(type)) {
     // 是 ClassComponent | FunctionComponent
-    if (type.prototype.isReactComponent) {
+    if (type.prototype?.isReactComponent) {
       fiberTag = ClassComponent;
     } else {
       fiberTag = FunctionComponent;
@@ -139,6 +143,8 @@ export function createFiberFromTypeAndProps(
   } else if (type === REACT_FRAGMENT_TYPE) {
     fiberTag = Fragment;
     // return createFiberFromFragment(pendingProps.children, lanes, key);
+  } else if (type.$$typeof === REACT_PROVIDER_TYPE) {
+    fiberTag = ContextProvider;
   }
 
   const fiber = createFiber(fiberTag, pendingProps, key);
@@ -169,5 +175,5 @@ export function createFiberFromText(content: string): Fiber {
 
 function shouldConstruct(Component: Function) {
   const prototype = Component.prototype;
-  return !!(prototype && prototype.isReactComponent);
+  return !!(prototype && prototype?.isReactComponent);
 }

@@ -4,6 +4,7 @@ import type { Fiber, FiberRoot } from "./ReactInternalTypes";
 import { HostRoot } from "./ReactWorkTags";
 import { Flags, Passive, Update } from "./ReactFiberFlags";
 import { HookFlags, HookLayout, HookPassive } from "./ReactHookEffectTags";
+import { readProvider } from "./ReactFiberNewContext";
 
 type Hook = {
   memorizedState: any;
@@ -279,4 +280,10 @@ function pushEffect(
   }
 
   return effect;
+}
+
+export function useContext(context: any) {
+  // 如何找到最近的 Provider 的值呢？
+  // 因為有可能 一樣的provider 包兩層，但 default 不一樣呀
+  return readProvider(context);
 }

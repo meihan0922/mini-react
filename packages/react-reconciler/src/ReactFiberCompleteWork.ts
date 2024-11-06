@@ -2,12 +2,14 @@ import { isNum, isStr } from "@mono/shared/utils";
 import type { Fiber } from "./ReactInternalTypes";
 import {
   ClassComponent,
+  ContextProvider,
   Fragment,
   FunctionComponent,
   HostComponent,
   HostRoot,
   HostText,
 } from "./ReactWorkTags";
+import { popProvider } from "./ReactFiberNewContext";
 
 // 針對 workInProgress 創建真實 DOM
 export function completeWork(
@@ -21,6 +23,10 @@ export function completeWork(
     case Fragment:
     case ClassComponent:
     case FunctionComponent: {
+      return null;
+    }
+    case ContextProvider: {
+      popProvider(workInProgress.type._context);
       return null;
     }
     // 原生標籤

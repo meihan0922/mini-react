@@ -8,33 +8,29 @@ import {
   useRef,
   useEffect,
   useLayoutEffect,
-} from "@mono/react";
-import {
-  Component,
-  Context,
   createContext,
-  memo,
-  ReactNode,
   useContext,
-} from "react";
+} from "@mono/react";
+import { Component, Context, memo, ReactNode } from "react";
 
 // 1. 創建 context
 const CountContext = createContext(0);
+const ColorContext = createContext("red");
 
 const Child = () => {
-  console.log("child");
   // 3-2. 後代組件消費 value
   const count = useContext(CountContext);
+
   return (
     <div>
       <h1>{count}</h1>
       {/* 3-3. 後代組件消費 */}
-      <CountContext.Consumer>{(value) => <p>{value}</p>}</CountContext.Consumer>
+      {/* <CountContext.Consumer>{(value) => <p>{value}</p>}</CountContext.Consumer> */}
     </div>
   );
 };
 class ClassChild extends Component {
-  // 3-1. 後代組件消費 value，這個名稱不能更動，只能消費單一的來源
+  // 3-1. 後代組件消費 value，這個名稱不能更 動，只能消費單一的來源
   static contextType = CountContext;
   render() {
     return <div>類組件{this.context as number}</div>;
@@ -42,28 +38,27 @@ class ClassChild extends Component {
 }
 
 function Comp() {
-  const [count, setCount] = useReducer((x) => x + 1, 0);
-  useEffect(() => {
-    console.log("useEffect");
-  }, []);
-
-  useLayoutEffect(() => {
-    console.log("useLayoutEffect");
-  }, [count]);
+  const [count, setCount] = useReducer((x) => x + 1, 1);
 
   return (
     // 2. 創建 Provider 組件，對後代對象組件進行傳遞 value
-    <CountContext.Provider value={count}>
-      <button
-        onClick={() => {
-          setCount();
-        }}
-      >
-        {count}
-      </button>
-      <Child />
-      <ClassChild />
-    </CountContext.Provider>
+    <div>
+      <CountContext.Provider value={count}>
+        <ColorContext.Provider value="green">
+          <CountContext.Provider value={count + 1}>
+            <button
+              onClick={() => {
+                setCount();
+              }}
+            >
+              add
+            </button>
+            <Child />
+          </CountContext.Provider>
+        </ColorContext.Provider>
+        <Child />
+      </CountContext.Provider>
+    </div>
   );
 }
 
