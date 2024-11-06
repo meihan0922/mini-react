@@ -22,6 +22,6 @@ export function popProvider<T>(context: ReactContext<T>): void {
 }
 
 // 後代組件消費
-export function readProvider<T>(context: ReactContext<T>) {
+export function readContext<T>(context: ReactContext<T>) {
   return context._currentValue;
 }

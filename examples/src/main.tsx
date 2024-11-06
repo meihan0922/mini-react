@@ -25,7 +25,16 @@ const Child = () => {
     <div>
       <h1>{count}</h1>
       {/* 3-3. 後代組件消費 */}
-      {/* <CountContext.Consumer>{(value) => <p>{value}</p>}</CountContext.Consumer> */}
+      <ColorContext.Consumer>
+        {(theme) => (
+          <div>
+            {theme}
+            <CountContext.Consumer>
+              {(value) => <p>{value}</p>}
+            </CountContext.Consumer>
+          </div>
+        )}
+      </ColorContext.Consumer>
     </div>
   );
 };

@@ -2,6 +2,7 @@ import { isNum, isStr } from "@mono/shared/utils";
 import type { Fiber } from "./ReactInternalTypes";
 import {
   ClassComponent,
+  ContextConsumer,
   ContextProvider,
   Fragment,
   FunctionComponent,
@@ -22,7 +23,8 @@ export function completeWork(
     case HostRoot:
     case Fragment:
     case ClassComponent:
-    case FunctionComponent: {
+    case FunctionComponent:
+    case ContextConsumer: {
       return null;
     }
     case ContextProvider: {

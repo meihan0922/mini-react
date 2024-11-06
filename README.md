@@ -56,6 +56,7 @@
       - [結構](#結構)
       - [創建 context](#創建-context)
       - [beginWork 處理 ](#beginwork-處理-)
+    - [Consumer](#consumer)
 
 # mini-react
 
@@ -3577,14 +3578,22 @@ const CountContext = createContext(0);
 const ColorContext = createContext("red");
 
 const Child = () => {
-  console.log("child");
   // 3-2. 後代組件消費 value
   const count = useContext(CountContext);
   return (
     <div>
       <h1>{count}</h1>
       {/* 3-3. 後代組件消費 */}
-      <CountContext.Consumer>{(value) => <p>{value}</p>}</CountContext.Consumer>
+      <ColorContext.Consumer>
+        {(theme) => (
+          <div>
+            {theme}
+            <CountContext.Consumer>
+              {(value) => <p>{value}</p>}
+            </CountContext.Consumer>
+          </div>
+        )}
+      </ColorContext.Consumer>
     </div>
   );
 };
@@ -3832,7 +3841,7 @@ export function popProvider<T>(context: ReactContext<T>): void {
 }
 
 // 後代組件消費
-export function readProvider<T>(context: ReactContext<T>) {
+export function readContext<T>(context: ReactContext<T>) {
   return context._currentValue;
 }
 ```
@@ -3869,3 +3878,159 @@ export function pop<T>(cursor: StackCursor<T>): void {
 ```
 
 小結：每一次更新 stack 都會放入 context 預設值，然後再還原。指針和 fiber 上的 context.\_currentValue 會紀錄保留和更新的值。
+
+### Consumer
+
+> react/src/ReactContext.ts
+
+```ts
+import type { ReactContext } from "@mono/shared/ReactTypes";
+import {
+  REACT_CONTEXT_TYPE,
+  REACT_PROVIDER_TYPE,
+} from "@mono/shared/ReactSymbols";
+
+export function createContext<T>(defaultValue: T): ReactContext<T> {
+  const context: ReactContext<T> = {
+    $$typeof: REACT_CONTEXT_TYPE,
+    _currentValue: defaultValue,
+    Provider: null,
+    Consumer: null,
+  };
+
+  context.Provider = {
+    $$typeof: REACT_PROVIDER_TYPE,
+    _context: context,
+  };
+
+  // Consumer 儲存整個 context 本身
+  context.Consumer = context;
+  return context;
+}
+```
+
+> react-reconciler/src/ReactFiber.ts
+
+```ts
+export function createFiberFromTypeAndProps(
+  type: any,
+  key: null | string,
+  pendingProps: any,
+  lanes: Lanes = NoLanes
+): Fiber {
+  // 是組件！
+  let fiberTag: WorkTag = IndeterminateComponent;
+  if (isFn(type)) {
+    // 省略
+  } else if (isStr(type)) {
+    // 如果是原生標籤
+    // 省略
+  } else if (type === REACT_FRAGMENT_TYPE) {
+    // 省略
+  } else if (type.$$typeof === REACT_PROVIDER_TYPE) {
+    // 省略
+  } else if (type.$$typeof === REACT_CONTEXT_TYPE) {
+    fiberTag = ContextConsumer;
+  }
+  // 省略
+  return fiber;
+}
+```
+
+> react-reconciler/src/ReactFiberBeginWork.ts
+
+```ts
+export function beginWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  switch (workInProgress.tag) {
+    // 省略
+    case ContextConsumer:
+      return updateContextConsumer(current, workInProgress);
+  }
+  // 省略
+}
+```
+
+```ts
+function updateContextConsumer(current: Fiber | null, workInProgress: Fiber) {
+  const context = workInProgress.type;
+  const newValue = readContext(context);
+  const render = workInProgress.pendingProps.children;
+  const newChildren = render(newValue);
+
+  reconcileChildren(current, workInProgress, newChildren);
+
+  return workInProgress.child;
+}
+```
+
+> react-reconciler/src/ReactFiberCompleteWork.ts
+
+```ts
+export function completeWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  const { type, pendingProps } = workInProgress;
+
+  switch (workInProgress.tag) {
+    // 省略
+    case ContextConsumer: {
+      return null;
+    }
+    // 省略
+}
+```
+
+這個時候應該就可以運行了
+
+```tsx
+const CountContext = createContext(0);
+const ColorContext = createContext("red");
+
+const Child = () => {
+  const count = useContext(CountContext);
+
+  return (
+    <div>
+      <h1>{count}</h1>
+      <ColorContext.Consumer>
+        {(theme) => (
+          <div>
+            {theme}
+            <CountContext.Consumer>
+              {(value) => <p>{value}</p>}
+            </CountContext.Consumer>
+          </div>
+        )}
+      </ColorContext.Consumer>
+    </div>
+  );
+};
+
+function Comp() {
+  const [count, setCount] = useReducer((x) => x + 1, 1);
+
+  return (
+    <div>
+      <CountContext.Provider value={count}>
+        <ColorContext.Provider value="green">
+          <CountContext.Provider value={count + 1}>
+            <button
+              onClick={() => {
+                setCount();
+              }}
+            >
+              add
+            </button>
+            <Child />
+          </CountContext.Provider>
+        </ColorContext.Provider>
+        <Child />
+      </CountContext.Provider>
+    </div>
+  );
+}
+```

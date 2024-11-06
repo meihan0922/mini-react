@@ -1,11 +1,13 @@
 import { ReactElement, ReactFragment } from "../../shared/ReactTypes";
 import {
+  REACT_CONTEXT_TYPE,
   REACT_FRAGMENT_TYPE,
   REACT_PROVIDER_TYPE,
 } from "../../shared/ReactSymbols";
 import { isFn, isStr } from "../../shared/utils";
 import {
   ClassComponent,
+  ContextConsumer,
   ContextProvider,
   Fragment,
   FunctionComponent,
@@ -145,8 +147,9 @@ export function createFiberFromTypeAndProps(
     // return createFiberFromFragment(pendingProps.children, lanes, key);
   } else if (type.$$typeof === REACT_PROVIDER_TYPE) {
     fiberTag = ContextProvider;
+  } else if (type.$$typeof === REACT_CONTEXT_TYPE) {
+    fiberTag = ContextConsumer;
   }
-
   const fiber = createFiber(fiberTag, pendingProps, key);
   fiber.elementType = type;
   fiber.type = type;

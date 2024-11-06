@@ -9,8 +9,9 @@ import {
   ClassComponent,
   FunctionComponent,
   ContextProvider,
+  ContextConsumer,
 } from "./ReactWorkTags";
-import { pushProvider } from "./ReactFiberNewContext";
+import { pushProvider, readContext } from "./ReactFiberNewContext";
 import { shouldSetTextContent } from "@mono/react-dom/client/ReactDOMHostConfig";
 // 處理當前的節點，因應不同節點做不同的處理
 // 返回子節點
@@ -34,9 +35,22 @@ export function beginWork(
       return updateFunctionComponent(current, workInProgress);
     case ContextProvider:
       return updateContextProvider(current, workInProgress);
+    case ContextConsumer:
+      return updateContextConsumer(current, workInProgress);
   }
   // TODO:
   throw new Error(`beginWork 有標籤沒有處理到 - ${workInProgress.tag}`);
+}
+
+function updateContextConsumer(current: Fiber | null, workInProgress: Fiber) {
+  const context = workInProgress.type;
+  const newValue = readContext(context);
+  const render = workInProgress.pendingProps.children;
+  const newChildren = render(newValue);
+
+  reconcileChildren(current, workInProgress, newChildren);
+
+  return workInProgress.child;
 }
 
 function updateContextProvider(current: Fiber | null, workInProgress: Fiber) {

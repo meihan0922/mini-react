@@ -11,11 +11,12 @@ export function createContext<T>(defaultValue: T): ReactContext<T> {
     Provider: null,
     Consumer: null,
   };
-  // TODO: Provider Consumer
 
   context.Provider = {
     $$typeof: REACT_PROVIDER_TYPE,
     _context: context,
   };
+
+  context.Consumer = context;
   return context;
 }

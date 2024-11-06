@@ -16,7 +16,6 @@ export function push<T>(cursor: StackCursor<T>, value: T): void {
 }
 
 export function pop<T>(cursor: StackCursor<T>): void {
-  debugger;
   if (index < 0) return;
   // cursor.current 紀錄上一個棧尾元素
   cursor.current = valueStack[index];
