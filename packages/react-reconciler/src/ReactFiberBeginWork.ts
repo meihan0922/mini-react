@@ -75,6 +75,8 @@ function updateContextProvider(current: Fiber | null, workInProgress: Fiber) {
   const value = workInProgress.pendingProps.value;
   pushProvider(context, value);
 
+  // 源碼當中會再判斷 value 跟 children 是否相同，再去進行 reconcile協調，就比較省效能
+  // 如果 bailout return null 就不用再進行子標籤遍歷了
   reconcileChildren(
     current,
     workInProgress,
@@ -92,7 +94,7 @@ function updateClassComponent(current: Fiber | null, workInProgress: Fiber) {
   let instance = current?.stateNode;
   if (current === null) {
     // 實例在 type 上
-    instance = new type(pendingProps);
+    instance = new type(pendingProps, context);
     workInProgress.stateNode = instance;
   }
   instance.context = newValue;

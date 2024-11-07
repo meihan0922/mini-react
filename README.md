@@ -55,7 +55,8 @@
     - [模擬 context](#模擬-context)
       - [結構](#結構)
       - [創建 context](#創建-context)
-      - [beginWork 處理 ](#beginwork-處理-)
+      - [beginWork 處理 `<Provider>`](#beginwork-處理-provider)
+        - [補充源碼](#補充源碼)
     - [Consumer](#consumer)
     - [Class Component context](#class-component-context)
 
@@ -3572,6 +3573,7 @@ function commitPassiveEffects(finishedWork: Fiber) {
      1. contextType: 只能用在 _類組件_，且只能訂閱單一的 context 來源 (這個值名稱不能更動)
      2. useContext: 只能用在 _函式組件_ 或是 _自定義的 Hook 中_
      3. Consumer 組件: 無限制
+  4. 只有訂閱 context 的組件會更新，其他不受影響！但要注意 Provider state 應該要另外封裝使用，用 useMemo 包住（避免 Provider re-render，他的所有訂閱者都會更新，即使 value 沒有發生變化），children 以 props 傳入（一種 composition 的優化作法），如此可以確保在資料改變時，只有使用到此資料的 Consumer 元件會 re-render。
 
 ```tsx
 // 1. 創建 context
@@ -3627,6 +3629,8 @@ function Comp() {
 ```
 
 ### 模擬 context
+
+！沒有判斷實現訂閱者更新的部分。
 
 #### 結構
 
@@ -3716,14 +3720,16 @@ export function createFiberFromTypeAndProps(
 }
 ```
 
-#### beginWork 處理 <Provider>
+#### beginWork 處理 `<Provider>`
 
-考慮到所有的 context 都有初始值(createContext(defaultVal))，而 context 又有可以被重複使用的特性。在執行的順序會只讀取到最近的那個 context value，所以必須在製作 fiber 階段先儲存起來(context.\_currentValue 也指向最新的值），供後代消費，在使用完成(Child 已經執行完畢) completeWork 時，刪除，避免重複讀取。
+考慮到所有的 context 都有初始值(createContext(defaultVal))，而 context 又有可以被重複使用的特性。在執行的順序會只讀取到最近的那個 context value，所以必須在製作 fiber 階段先儲存起來(`context._currentValue` 也指向最新的值），供後代消費，在使用完成(Child 已經執行完畢) completeWork 時，刪除，避免重複讀取。
 
 - 概念：
-  - stack 裝 Context.Provider 上 context.\_currentValue 的初始值。
-  - 指針保留最後一個的 context.\_currentValue 值，再遇到下個 context 時才會放入 stack。
-  - 更新 context.\_currentValue 成 props 上 value 的樣子。可以確保 useContext 在調用 context 時會拿到最新的值。
+  - stack 裝 Context.Provider 上 `context._currentValue` 的初始值。比如有 n 個 value，把 n-1 個 value 放到 stack 當中，指針 cursor 則保留最後的值，方便讀取元素。
+    - 為什麼要用 stack 來儲存呢？因為 Provider 預期並不會這麼多，每個子節點都要向上尋找太麻煩。依賴 stack 做存提是比較高效的，stack 先進後出、棧尾操作的特性，也符合開始結束標籤的流程，beginWork/completeWork。
+    - 指針保留最後一個的 `context._currentValue` 值，再遇到下個 context 時才會放入 stack。
+  - 更新 `context._currentValue` 成 props 上 value 的樣子。
+    - 可以確保 useContext 在調用 context 時會拿到最新的值。
   - 彈出時，指針因為保留了上一個 context 的值，只要再還原給 context 就好，並且把指針指向到再上一個 context 值（也就是 stack[index])。
 
 比方說，兩個 context，使用三次
@@ -3762,21 +3768,21 @@ function Comp() {
 
 - beginWork 時，
 
-  - 指針目前指向 null ，存進 stack 當中，先紀錄上 valueStack：[null]，再更新指針指向-> context.\_currentValue ：0。更新掛載在 fiber 上的 context.\_currentValue，設成 props 上的 value：1。
-  - 指針目前指向的上一次的值 0 ，存進 stack 當中，valueStack：[null, 0]，再更新指針指向-> context.\_currentValue ："red"，更新掛載在 fiber 上的 context.\_currentValue，設成 props 上的 value："green"。
-  - 指針指向的上一次的值 "red" ，存進 stack 當中，valueStack：[null, 0, "red"]，再更新指針指向-> context.\_currentValue ：1，更新掛載在 fiber 上的 context.\_currentValue，設成 props 上的 value："2"。
+  - 指針目前指向 `null` ，存進 stack 當中，先紀錄上 valueStack：`[null]`，再更新指針指向-> `context._currentValue：0`。更新掛載在 fiber 上的 `context._currentValue`，設成 props 上的 value：1。
+  - 指針目前指向的上一次的值 0 ，存進 stack 當中，valueStack：`[null, 0]`，再更新指針指向-> `context._currentValue："red"`，更新掛載在 fiber 上的 `context._currentValue`，設成 props 上的 value："green"。
+  - 指針指向的上一次的值 "red" ，存進 stack 當中，valueStack：`[null, 0, "red"]`，再更新指針指向-> `context._currentValue ：1`，更新掛載在 fiber 上的 `context._currentValue`，設成 props 上的 value："2"。
 
-- 子元件使用時，<Child /> 在呼叫時，useContext 讀到的 context.\_currentValue -> 2。
-
-- completeWork 時，
-
-  - </CountContext.Provider> 指針指向的是保留下來尚未更新 props 的 1，設定 currentValue 保存 1。更新指針指向上一個 stack 的保留值 - "red"。stack 對應位置設定成 null。context.\_currentValue 指向 currentValue - 1。
-  - </ColorContext.Provider> 指針指向的是保留下來尚未更新 props 的 "red"，設定 currentValue 保存 "red"。更新指針指向上一個 stack 的保留值 - "0"。stack 對應位置設定成 null。context.\_currentValue 指向 currentValue - "red"。
-
-- 子元件使用時，<Child /> 在呼叫時，useContext 讀到的 context.\_currentValue - 1。
+- 子元件使用時，`<Child />` 在呼叫時，`useContext` 讀到的 `context._currentValue` -> 2。
 
 - completeWork 時，
-  - </CountContext.Provider> 指針指向的是保留下來尚未更新 props 的 0，設定 currentValue 保存 0。更新指針指向上一個 stack 的保留值 - null。stack 對應位置設定成 null。
+
+  - `</CountContext.Provider>` 指針指向的是保留下來尚未更新 props 的 1，設定 currentValue 保存 1。更新指針指向上一個 stack 的保留值 - "red"。stack 對應位置設定成 `null`。`context._currentValue` 指向 currentValue - 1。
+  - `</ColorContext.Provider>` 指針指向的是保留下來尚未更新 props 的 "red"，設定 currentValue 保存 "red"。更新指針指向上一個 stack 的保留值 - "0"。stack 對應位置設定成 `null` 。`context._currentValue` 指向 currentValue - "red"。
+
+- 子元件使用時，`<Child />` 在呼叫時，useContext 讀到的 `context._currentValue` - 1。
+
+- completeWork 時，
+  - `</CountContext.Provider>` 指針指向的是保留下來尚未更新 props 的 0，設定 currentValue 保存 0。更新指針指向上一個 stack 的保留值 - null。stack 對應位置設定成 null。
 
 ```ts
 export function beginWork(
@@ -3812,6 +3818,8 @@ function updateContextProvider(current: Fiber | null, workInProgress: Fiber) {
   return workInProgress.child;
 }
 ```
+
+**找到一個匹配的 context 就可以停止遍歷單鏈表了。**
 
 先處理紀錄 context
 
@@ -3878,7 +3886,22 @@ export function pop<T>(cursor: StackCursor<T>): void {
 }
 ```
 
-小結：每一次更新 stack 都會放入 context 預設值，然後再還原。指針和 fiber 上的 context.\_currentValue 會紀錄保留和更新的值。
+小結：每一次更新 stack 都會放入 context 預設值，然後再還原。指針和 fiber 上的 `context._currentValue` 會紀錄保留和更新的值。
+
+##### 補充源碼
+
+在源碼當中，會去判斷 value 有沒有發生變化，如果 children 也沒有變化，不需要再進行後面的 render 流程，直接 bailout，但如果 context value 發生改變，必須要搜索匹配的後代消費者並調度更新他們！
+
+後代消費者（函式組件、類組件、consumer 組件）會把 context 會存在 `workInProgress.dependencies.firstContext` 上，以鏈表的形式儲存(也有 next 和 memorizedValue 的屬性）。
+
+後代消費者在 beginWork 時，會調用 `prepareToReadContext` 如果有 context 了就標記更新，不然就初始化鏈表 設成空。
+`readContextForConsumer` 讀取 context 時，建立鏈表，或是已經有頭節點就銜接到 next 上。（源碼中，流程跟思路跟 hook 構建有點像）。
+開始深度優先遍歷，遍歷 workInProgress.child ，while 處理
+
+1. 判斷如果有 context 消費，遍歷此單鏈表 `workInProgress.dependencies.firstContext`，找到匹配的 context 則調度更新，更新 fiber.lanes 和 所有祖先的 childLanes。
+2. 判斷是 匹配的 Provider，就不需要繼續遍歷。因為 Provider 會再次走到 `updateContextProvider`。
+
+遍歷完子節點找兄弟節點，再遍歷父節點的兄弟節點。
 
 ### Consumer
 
@@ -4075,7 +4098,7 @@ function updateClassComponent(current: Fiber | null, workInProgress: Fiber) {
   let instance = current?.stateNode;
   if (current === null) {
     // 實例在 type 上
-    instance = new type(pendingProps);
+    instance = new type(pendingProps, context);
     workInProgress.stateNode = instance;
   }
   // 賦給 context

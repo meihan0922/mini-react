@@ -16,9 +16,9 @@ export function pushProvider<T>(context: ReactContext<T>, nextValue: T): void {
 export function popProvider<T>(context: ReactContext<T>): void {
   // 紀錄下當前的值到 context 上，但此 context 已經彈出 stack
   const currentValue = valueCursor.current;
-  pop(valueCursor);
   // 後續其他相同 context 在讀取時
   context._currentValue = currentValue;
+  pop(valueCursor);
 }
 
 // 後代組件消費
