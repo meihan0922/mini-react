@@ -53,7 +53,8 @@ function Comp() {
     // 2. 創建 Provider 組件，對後代對象組件進行傳遞 value
     <div>
       <button
-        onClick={() => {
+        onClick={(e) => {
+          console.log("event---->", e);
           setCount();
         }}
       >

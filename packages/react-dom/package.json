@@ -12,6 +12,7 @@
   "dependencies": {
     "@mono/shared": "workspace:*",
     "@mono/react": "workspace:*",
-    "@mono/react-reconciler": "workspace:*"
+    "@mono/react-reconciler": "workspace:*",
+    "@mono/react-dom-bindings": "workspace:*"
   }
 }

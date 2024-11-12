@@ -178,7 +178,6 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
   ) {
     // 判斷節點可以復用嗎
     const key = oldFiber !== null ? oldFiber.key : null;
-
     // 像是 reconcileChildFibers 也要先處理文字節點，再去判斷，
     if (isText(newChild)) {
       // 如果是文本節點 是沒有key的

@@ -28,7 +28,6 @@ function recursivelyTraverseMutationEffects(root, parentFiber: Fiber) {
 function commitReconciliationEffects(finishedWork: Fiber) {
   // TODO 只先完成 Placement ChildDeletion
   const flags = finishedWork.flags;
-
   if (flags & Placement) {
     // 頁面初次渲染，新增插入 appendChild
     commitPlacement(finishedWork);

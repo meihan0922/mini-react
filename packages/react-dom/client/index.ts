@@ -8,7 +8,7 @@ import {
   createContainer,
   updateContainer,
 } from "@mono/react-reconciler/src/ReactFiberReconciler";
-
+import { listenToAllSupportedEvents } from "@mono/react-dom-bindings/src/events/DOMPluginEventSystem";
 type RootType = {
   render: (children: ReactNodeList) => void;
   _internalRoot: FiberRoot;
@@ -30,7 +30,8 @@ function createRoot(
   container: Element | Document | DocumentFragment
 ): RootType {
   const root = createContainer(container, ConcurrentRoot);
-
+  // 綁定事件
+  listenToAllSupportedEvents(container);
   return new ReactDOMRoot(root);
 }
 

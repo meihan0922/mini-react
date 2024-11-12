@@ -11,6 +11,10 @@ import {
   HostText,
 } from "./ReactWorkTags";
 import { popProvider } from "./ReactFiberNewContext";
+import {
+  precacheFiberNode,
+  updateFiberProps,
+} from "../../react-dom-bindings/src/client/ReactDOMComponentTree";
 
 // 針對 workInProgress 創建真實 DOM
 export function completeWork(
@@ -45,10 +49,16 @@ export function completeWork(
         appendAllChildren(instance, workInProgress);
         workInProgress.stateNode = instance;
       }
+      // 存 key 值在 dom 身上，方便合成事件尋找 fiber 本身
+      precacheFiberNode(workInProgress, workInProgress.stateNode as Element);
+      updateFiberProps(workInProgress.stateNode, pendingProps);
       return null;
     }
     case HostText: {
       workInProgress.stateNode = document.createTextNode(pendingProps);
+      // 存 key 值在 dom 身上，方便合成事件尋找 fiber 本身
+      precacheFiberNode(workInProgress, workInProgress.stateNode as Element);
+      updateFiberProps(workInProgress.stateNode, pendingProps);
       return null;
     }
     // TODO: 其他組件標籤 之後再說
@@ -94,7 +104,7 @@ function finalizeInitialChildren(
       // 處理事件
       if (propKey === "onClick") {
         // 移除舊的click事件
-        domElement.removeEventListener("click", prevProp);
+        // domElement.removeEventListener("click", prevProp);
       } else {
         // 如果新的props沒有，把他設置成空
         if (!(prevProp in nextProps)) {

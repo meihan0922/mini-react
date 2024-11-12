@@ -59,6 +59,17 @@
         - [補充源碼](#補充源碼)
     - [Consumer](#consumer)
     - [Class Component context](#class-component-context)
+  - [合成事件](#合成事件)
+    - [事件委託](#事件委託)
+    - [不適合委託的事件](#不適合委託的事件)
+    - [模擬合成事件](#模擬合成事件)
+      - [實現事件註冊](#實現事件註冊)
+        - [不適合委託的事件型別](#不適合委託的事件型別)
+        - [實現不同類型的事件註冊](#實現不同類型的事件註冊)
+        - [實現事件派發](#實現事件派發)
+          - [提取事件](#提取事件)
+        - [處理 Lane](#處理-lane)
+      - [實現合成事件](#實現合成事件)
 
 # mini-react
 
@@ -4111,3 +4122,1382 @@ function updateClassComponent(current: Fiber | null, workInProgress: Fiber) {
 ```
 
 現在就可以實現 class component 使用 context 的情境。
+
+## 合成事件
+
+react 基於瀏覽器事件機制自身實踐了一套事件機制。包括事件註冊、事件冒泡、事件派發，合稱為合成事件。
+相比於原生的機制，不僅考慮了瀏覽器的兼容性，還考慮了內存和性能，像是實踐了事件委託。
+
+在 JS 當中，每個函式都是物件，物件越多性能越差。指定事件處理程序所需要訪問 DOM 的次數會先造成整個頁面的交互延遲，只要在使用事件處理程序時多注意一些方法，就可以改善頁面性能。
+
+### 事件委託
+
+事件委託是用來解決過多的事件處理程序，**利用事件冒泡**，可以只使用一個事件處理程序來管理一種類型的事件。比方説只要在 document 綁定 click 事件，就可以為整個頁面指定一個統一處理 click 的程序。
+
+優點有
+
+1. document 不用等 DOMContentLoaded 或是 load 事件。這意味著只要頁面渲染出可點擊的元件，就不會有延遲。
+2. 節省花在設置頁面事件處理的時間，只有指定一個事件處理可以節省 DOM 引用和節省時間。
+3. 減少頁面所需的內存，提升整體的性能。
+
+合成事件就是基於事件委託。
+v16 之前的版本將事件委託給 `document.addEventListener`，一旦想要局部使用 react ，就會影響全局。而且有事件池統一管理事件，事件回調函式內，如果有延遲的 cb 都會被取消掉（react 在舊的瀏覽器中重用了不同事件的事件對象，以提高性能，所有事件會被設置成 null)，除非加上 `e.persist()`。
+v17 之後把事件委託放在了可控的 container 層。這樣可以局部的使用 react，甚至是不同版本的 react 放在同一頁面使用。
+
+### 不適合委託的事件
+
+比如 cancel, scroll...，在冒泡的行為不一致，也就不把事件委託給 container。
+
+### 模擬合成事件
+
+#### 實現事件註冊
+
+建立一個新的 package，`react-dom-bindings`，
+先建立型別
+
+> react-dom-bindings/src/events/DOMEventNames.ts
+
+```ts
+export type DOMEventName =
+  | "abort"
+  | "afterblur" // Not a real event. This is used by event experiments.
+  // These are vendor-prefixed so you should use the exported constants instead:
+  // 'animationiteration' |
+  // 'animationend |
+  // 'animationstart' |
+  | "beforeblur" // Not a real event. This is used by event experiments.
+  | "beforeinput"
+  | "beforetoggle"
+  | "blur"
+  // 省略
+  | "volumechange"
+  | "waiting"
+  | "wheel";
+```
+
+之前為了方便實現，在 `react-reconciler/src/ReactFiberCompleteWork.ts` 中 `finalizeInitialChildren` 寫了這段 要移除
+
+```ts
+if (propKey === "onClick") {
+  // 移除舊的click事件
+  // domElement.removeEventListener("click", prevProp);
+  // 直接添加在 document 上的，性能不好
+}
+```
+
+現在事件就沒有觸發了
+
+##### 不適合委託的事件型別
+
+> react-dom-bindings/src/events/DOMPluginEventSystem.ts
+
+```ts
+// List of events that need to be individually attached to media elements.
+// 需要分別附加到媒體元素的事件列表
+export const mediaEventTypes: Array<DOMEventName> = [
+  "abort",
+  "canplay",
+  "canplaythrough",
+  "durationchange",
+  "emptied",
+  "encrypted",
+  "ended",
+  "error",
+  "loadeddata",
+  "loadedmetadata",
+  "loadstart",
+  "pause",
+  "play",
+  "playing",
+  "progress",
+  "ratechange",
+  "resize",
+  "seeked",
+  "seeking",
+  "stalled",
+  "suspend",
+  "timeupdate",
+  "volumechange",
+  "waiting",
+];
+
+// We should not delegate these events to the container, but rather
+// set them on the actual target element itself. This is primarily
+// because these events do not consistently bubble in the DOM.
+// 我們不應該將事件委託給容器，應該直接在實際的目標元素上設置他們。
+// 主要是因為這些事件在 DOM 的冒泡行為不一致
+export const nonDelegatedEvents: Set<DOMEventName> = new Set([
+  "beforetoggle",
+  "cancel",
+  "close",
+  "invalid",
+  "load",
+  "scroll",
+  "scrollend",
+  "toggle",
+  // In order to reduce bytes, we insert the above array of media events
+  // into this Set. Note: the "error" event isn't an exclusive media event,
+  // and can occur on other elements too. Rather than duplicate that event,
+  // we just take it from the media events array.
+  ...mediaEventTypes,
+]);
+```
+
+##### 實現不同類型的事件註冊
+
+我們知道 react 把事件分成不同的類型，賦予不同的優先級，這裡只以 `SimpleEventPlugin` 為例
+
+> react-dom-bindings/src/events/DOMPluginEventSystem.ts
+
+```ts
+import * as SimpleEventPlugin from "./plugins/SimpleEventPlugin";
+
+// 不同類型的事件註冊
+SimpleEventPlugin.registerEvents();
+// EnterEventPlugin.registerEvents();
+// ChangeEventPlugin.registerEvents();
+// SelectEventPlugin.registerEvents();
+// BeforeEventPlugin.registerEvents();
+```
+
+> `react-dom-bindings/src/events/plugins/SimpleEventPlugin.ts`
+
+```ts
+import { registrySimpleEvents } from "../DOMEventProperties";
+
+export { registrySimpleEvents as registryEvents };
+```
+
+> react-dom-bindings/src/events/DOMEventProperties.ts
+
+```ts
+const simpleEventPluginEvents = [
+  "click",
+  // 省略
+  "toggle",
+  "touchMove",
+  "wheel",
+];
+
+// 然後改成 react 當中使用的小駝峰的寫法，進行紀錄
+// 註冊
+export function registrySimpleEvents() {
+  for (let i = 0; i < simpleEventPluginEvents.length; i++) {
+    const eventName = simpleEventPluginEvents[i];
+    const domEventName = eventName.toLowerCase() as DOMEventName;
+    const capitalizedEvent = eventName[0].toUpperCase() + eventName.slice(1);
+    registrySimpleEvent(domEventName, "on" + capitalizedEvent);
+  }
+
+  registrySimpleEvent("dblclick", "onDoubleClick");
+  registrySimpleEvent("focusin", "onFocus");
+  registrySimpleEvent("focusout", "obBlur");
+}
+
+import { registerTwoPhaseEvent } from "./EventRegistry";
+
+// 建立原生事件和 react 事件名稱的映射表
+export const topLevelEventsToReactNames: Map<DOMEventName, string | null> =
+  new Map();
+
+function registrySimpleEvent()(domEventName: DOMEventName, reactName: string) {
+  // 設定進映射表中
+  topLevelEventsToReactNames.set(domEventName, reactName);
+  // 註冊冒泡和捕獲階段
+  registerTwoPhaseEvent(reactName, [domEventName]);
+}
+```
+
+> react-dom-bindings/src/events/EventRegistry.ts
+
+```ts
+export const allNativeEvents: Set<DOMEventName> = new Set();
+export const registrationNameDependencies: {
+  [registrationName: string]: Array<DOMEventName>;
+} = {};
+
+// 事件註冊
+export function registerTwoPhaseEvent(
+  registrationName: string,
+  dependencies: Array<DOMEventName>
+) {
+  registerDirectEvent(registrationName, dependencies);
+  registerDirectEvent(registrationName + "Capture", dependencies);
+}
+```
+
+回到 react-dom ，我們要把事件綁定在 root 上
+
+> react-dom/client/index.ts
+
+```ts
+import { listenToAllSupportedEvents } from "@mono/react-dom-bindings/src/events/DOMPluginEventSystem";
+
+function createRoot(
+  container: Element | Document | DocumentFragment
+): RootType {
+  const root = createContainer(container, ConcurrentRoot);
+  // 綁定事件
+  listenToAllSupportedEvents(container);
+  return new ReactDOMRoot(root);
+}
+```
+
+> react-dom-bindings/src/events/DOMPluginEventSystem.ts
+
+```ts
+const listeningMarker = "_reactListening" + Math.random().toString(36).slice(2);
+
+export function listenToAllSupportedEvents(rootContainerElement: EventTarget) {
+  // 防止重複綁定
+  if (!rootContainerElement[listeningMarker]) {
+    rootContainerElement[listeningMarker] = true;
+    allNativeEvents.forEach((domEventName) => {
+      // 特殊處理 selectionchange
+      if (domEventName !== "selectionchange") {
+        // 捕獲階段 冒泡階段
+        // 有些事件在 DOM 上冒泡行為不一致，就不做事件委託
+        if (!nonDelegatedEvents.has(domEventName)) {
+          // 第二個參數是事件類型
+          listenToNativeEvent(domEventName, false, rootContainerElement);
+        }
+        listenToNativeEvent(domEventName, true, rootContainerElement);
+      }
+    });
+  }
+}
+
+// flag 標記一下
+function listenToNativeEvent(
+  domEventName: DOMEventName,
+  isCapturePhaseListener: boolean,
+  target: EventTarget
+) {
+  let eventSystemFlags = 0;
+  if (isCapturePhaseListener) {
+    // 標記是不是捕獲階段
+    eventSystemFlags |= IS_CAPTURE_PHASE;
+  }
+  addTrappedEventListener(
+    target,
+    domEventName,
+    eventSystemFlags,
+    isCapturePhaseListener
+  );
+}
+
+function addTrappedEventListener(
+  target: EventTarget,
+  domEventName: DOMEventName,
+  eventSystemFlags: EventSystemFlags,
+  isCapturePhaseListener: boolean
+) {
+  // ! 1. 獲取對應事件，事件定義在 ReactDOMEventListener.js 當中
+  // 獲取不同的優先級，定義不同的派發方法
+  // 如 DiscreteEventPriority 對應 dispatchDiscreteEvent,
+  let listener = createEventListenerWrapperWithPriority(
+    target,
+    domEventName,
+    eventSystemFlags
+  );
+
+  // ! 2. 綁定事件
+  if (isCapturePhaseListener) {
+    addEventCaptureListener(target, domEventName, listener);
+  } else {
+    addEventBubbleListener(target, domEventName, listener);
+  }
+}
+```
+
+> react-dom-bindings/src/events/EventListeners.ts
+
+```ts
+export function addEventBubbleListener(
+  target: EventTarget,
+  eventType: string,
+  listener: Function
+) {
+  target.addEventListener(eventType, listener as any, false);
+  return listener;
+}
+
+export function addEventCaptureListener(
+  target: EventTarget,
+  eventType: string,
+  listener: Function
+) {
+  target.addEventListener(eventType, listener as any, true);
+  return listener;
+}
+
+export function removeEventCaptureListener(
+  target: EventTarget,
+  eventType: string,
+  listener: Function,
+  capture: boolean
+) {
+  target.removeEventListener(eventType, listener as any, capture);
+}
+```
+
+##### 實現事件派發
+
+> react-dom-bindings/src/events/DOMPluginEventSystem.ts
+
+```ts
+export type AnyNativeEvent = Event | KeyboardEvent | MouseEvent | TouchEvent;
+```
+
+> react-dom-bindings/src/events/ReactDOMEventListener.ts
+
+```ts
+export function createEventListenerWrapperWithPriority(
+  target: EventTarget,
+  domEventName: DOMEventName,
+  eventSystemFlags: EventSystemFlags
+) {
+  // 根據事件的名稱 獲取優先級
+  // 比如 click, input, drop 對應的優先級是 DiscreteEventPriority
+  // drag, scroll 對應的是 ContinuousEventPriority
+  // message 也許處於 scheduler 當中，根據 getCurrentSchedulerPriorityLevel 獲取優先級
+  // 其他事 DefaultEventPriority
+  const eventPriority = getEventPriority(domEventName);
+
+  let listenerWrapper;
+  switch (eventPriority) {
+    case DiscreteEventPriority:
+      listenerWrapper = dipatchDiscreteEvent;
+      break;
+    case ContinuousEventPriority:
+      listenerWrapper = dipatchContinuousEvent;
+      break;
+    case DefaultEventPriority:
+    default:
+      listenerWrapper = dispatchEvent;
+  }
+  return listenerWrapper.bind(null, domEventName, eventSystemFlags, target);
+}
+
+function dipatchDiscreteEvent(
+  domEventName: DOMEventName,
+  eventSystemFlags: EventSystemFlags,
+  target: EventTarget,
+  nativeEvent: AnyNativeEvent
+) {
+  console.log("dipatchDiscreteEvent", domEventName);
+  // 讀取當前事件的優先等級
+  const previousPriority = getCurrentUpdatePriority();
+  try {
+    // 設置為新的優先級 - DiscreteEventPriority
+    setCurrentUpdatePriority(DiscreteEventPriority);
+    // 調用 dispatchEvent，執行事件
+    dispatchEvent(domEventName, eventSystemFlags, target, nativeEvent);
+  } finally {
+    // 恢復之前的優先級
+    setCurrentUpdatePriority(previousPriority);
+  }
+}
+
+function dipatchContinuousEvent(
+  domEventName: DOMEventName,
+  eventSystemFlags: EventSystemFlags,
+  target: EventTarget,
+  nativeEvent: AnyNativeEvent
+) {
+  // 下方處理 Lane 有寫
+  // 拿到現在的優先級
+  const previousPriority = getCurrentUpdatePriority();
+  try {
+    // 設置為新的優先級 - DiscreteEventPriority
+    setCurrentUpdatePriority(ContinuousEventPriority);
+    // 調用 dispatchEvent，執行事件
+    dispatchEvent(domEventName, eventSystemFlags, target, nativeEvent);
+  } finally {
+    // 恢復之前的優先級
+    setCurrentUpdatePriority(previousPriority);
+  }
+}
+
+function dispatchEvent(
+  domEventName: DOMEventName,
+  eventSystemFlags: EventSystemFlags,
+  target: EventTarget,
+  nativeEvent: AnyNativeEvent
+) {
+  // 事件觸發的DOM本身
+  const nativeEventTarget = nativeEvent.target as Node;
+  // 事件回調在 fiber 上，要怎麼拿到對應的 fiber呢？
+  const return_targetInst = getClosestInstanceFromNode(nativeEventTarget);
+
+  const dispatchQueue: DispatchQueue = [];
+
+  // 給 dispatchQueue 添加事件
+  extractEvents(
+    dispatchQueue,
+    domEventName,
+    return_targetInst,
+    nativeEvent,
+    nativeEventTarget,
+    eventSystemFlags,
+    target
+  );
+
+  processDispatchQueue(dispatchQueue, eventSystemFlags);
+}
+```
+
+事件回調在 fiber 上，要怎麼拿到對應的 fiber 呢？
+
+把 props 通過 random key 存放在 `fiber.stateNode` 上，到時候就可以通過 key 取值了
+
+> react-dom-bindings/src/client/ReactDOMComponentTree.ts
+
+```ts
+import { Fiber } from "@mono/react-reconciler/src/ReactInternalTypes";
+
+const randomKey = Math.random().toString(36).slice(2);
+const internaleInstanceKey = "__reactFiber$" + randomKey;
+const internalePropseKey = "__reactPropsr$" + randomKey;
+
+export function precacheFiberNode(hostInst: Fiber, node: Element | Text): void {
+  node[internaleInstanceKey] = hostInst;
+}
+
+export function getClosestInstanceFromNode(targetNode: Node): null | Fiber {
+  let targetInst = targetNode[internaleInstanceKey];
+  if (targetInst) {
+    return targetInst as Fiber;
+  }
+  return null;
+}
+
+export function getFiberCurrentPropsFromNode(node: Element | Text) {
+  return node[internalePropseKey] || null;
+}
+
+export function updateFiberProps(node: Element | Text, props: any): void {
+  node[internalePropseKey] = props;
+}
+```
+
+在 completeWork 建立完 instance 時加上
+
+> react-reconciler/src/ReactFiberCompleteWork.ts
+
+```ts
+// 針對 workInProgress 創建真實 DOM
+export function completeWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  const { type, pendingProps } = workInProgress;
+
+  switch (workInProgress.tag) {
+    case HostRoot:
+    case Fragment:
+    case ClassComponent:
+    case FunctionComponent:
+    case ContextConsumer: {
+      return null;
+    }
+    case ContextProvider: {
+      popProvider(workInProgress.type._context);
+      return null;
+    }
+    // 原生標籤
+    case HostComponent: {
+      // 這邊也要進行復用條件判斷<如果已經有實例了，不需要再次創建
+      if (current !== null && workInProgress.stateNode !== null) {
+        updateHostComponent(current, workInProgress, type, pendingProps);
+      } else {
+        // 1. 創建真實dom
+        const instance = document.createElement(type);
+
+        // 2. 初始化DOM屬性
+        finalizeInitialChildren(instance, null, pendingProps);
+        appendAllChildren(instance, workInProgress);
+        workInProgress.stateNode = instance;
+      }
+      // 存 key 值在 dom 身上，方便合成事件尋找 fiber 本身
+      precacheFiberNode(workInProgress, workInProgress.stateNode as Element);
+      updateFiberProps(workInProgress.stateNode, pendingProps);
+      return null;
+    }
+    case HostText: {
+      workInProgress.stateNode = document.createTextNode(pendingProps);
+      // 存 key 值在 dom 身上，方便合成事件尋找 fiber 本身
+      precacheFiberNode(workInProgress, workInProgress.stateNode as Element);
+      updateFiberProps(workInProgress.stateNode, pendingProps);
+      return null;
+    }
+    // TODO: 其他組件標籤 之後再說
+  }
+  throw new Error("不知名的 work tag");
+}
+```
+
+###### 提取事件
+
+> react-dom-bindings/src/events/DOMPluginEventSystem.ts
+
+```ts
+export type DispatchListener = {
+  instance: null | Fiber;
+  listener: Function;
+  currentTarget: EventTarget;
+};
+
+type DispatchEntry = {
+  event: AnyNativeEvent; // TODO: 實現合成事件
+  listeners: Array<DispatchListener>;
+};
+
+export type DispatchQueue = Array<DispatchEntry>;
+
+export function extractEvents(
+  dispatchQueue: DispatchQueue,
+  domEventName: DOMEventName,
+  targetInst: null | Fiber,
+  nativeEvent: AnyNativeEvent,
+  nativeEventTarget: null | EventTarget,
+  eventSystemFlags: EventSystemFlags,
+  targetContainer: EventTarget
+) {
+  SimpleEventPlugin.extractEvents(
+    dispatchQueue,
+    domEventName,
+    targetInst,
+    nativeEvent,
+    nativeEventTarget,
+    eventSystemFlags,
+    targetContainer
+  );
+}
+```
+
+> react-dom-bindings/src/events/plugins/SimpleEventPlugin.ts
+
+```ts
+import { Fiber } from "@mono/react-reconciler/src/ReactInternalTypes";
+import { DOMEventName } from "../DOMEventNames";
+import {
+  registrySimpleEvents,
+  topLevelEventsToReactNames,
+} from "../DOMEventProperties";
+import {
+  accumulateSinglePhaseListeners,
+  AnyNativeEvent,
+  DispatchQueue,
+} from "../DOMPluginEventSystem";
+import { EventSystemFlags, IS_CAPTURE_PHASE } from "../EventSystemFlags";
+
+// export { registrySimpleEvents as registryEvents };
+
+function extractEvents(
+  dispatchQueue: DispatchQueue,
+  domEventName: DOMEventName,
+  targetInst: null | Fiber,
+  nativeEvent: AnyNativeEvent,
+  nativeEventTarget: null | EventTarget,
+  eventSystemFlags: EventSystemFlags,
+  targetContainer: EventTarget
+) {
+  // click -> onClick，從映射表把對應的 react 事件名拿出來
+  const reactName = topLevelEventsToReactNames.get(domEventName);
+  if (reactName === undefined) {
+    return;
+  }
+  // 是捕獲階段嗎
+  const inCapturePhase = (eventSystemFlags & IS_CAPTURE_PHASE) !== 0;
+  // 如果是 scroll | scrollend 事件，只會在冒泡階段觸發
+  const accumulateTargetOnly =
+    !inCapturePhase &&
+    (domEventName === "scroll" || domEventName === "scrollend");
+  // 拿到綁在 react 上的方法
+  // 遍歷 targetInst，一路向上搜集
+  const listeners = accumulateSinglePhaseListeners(
+    targetInst,
+    reactName,
+    nativeEvent.type,
+    inCapturePhase,
+    accumulateTargetOnly,
+    nativeEvent
+  );
+
+  if (listeners.length > 0) {
+    dispatchQueue.push({ event: nativeEvent, listeners });
+  }
+}
+
+export { registrySimpleEvents as registerEvents, extractEvents };
+```
+
+> react-dom-bindings/src/events/DOMPluginEventSystem.ts
+
+```ts
+export function accumulateSinglePhaseListeners(
+  targetFiber: null | Fiber,
+  reactName: string | null,
+  type: string,
+  inCapturePhase: boolean,
+  accumulateTargetOnly: boolean,
+  nativeEvent: AnyNativeEvent
+): Array<DispatchListener> {
+  const captureName = reactName !== null ? reactName + "Capture" : null;
+  const reactEventName = inCapturePhase ? captureName : reactName;
+  let listeners: Array<DispatchListener> = [];
+
+  let instance = targetFiber;
+  let lastHostComponent = null;
+
+  // 通過 target => root 累積所有的 fiber 和 listeners
+  while (instance !== null) {
+    const { stateNode, tag } = instance;
+    // 處理 HostComponents 原生標籤上的 listeners;
+    if (tag === HostComponent) {
+      lastHostComponent = stateNode;
+
+      if (reactEventName !== null) {
+        const listener = getListener(instance, reactEventName);
+
+        if (listener !== null) {
+          listeners.push({
+            instance,
+            listener,
+            currentTarget: stateNode,
+          });
+        }
+      }
+    }
+    // 如果只是為了 target 累積事件，那麼我們就不會繼續通過 React Fiber 樹傳播以查找其他的 listeners
+    // 比如是 scroll 就不需要在往上傳播
+    if (accumulateTargetOnly) {
+      break;
+    }
+    instance = instance.return;
+  }
+  return listeners;
+}
+```
+
+> react-dom-bindings/src/events/getListener.ts
+
+```ts
+import { Fiber } from "@mono/react-reconciler/src/ReactInternalTypes";
+import { getFiberCurrentPropsFromNode } from "../client/ReactDOMComponentTree";
+
+function isInteractive(tag) {
+  return (
+    tag === "button" ||
+    tag === "input" ||
+    tag === "select" ||
+    tag === "textarea"
+  );
+}
+
+// 檢查沒有被禁止
+function shouldPreventMouseEvent(
+  name: string,
+  type: string,
+  props: any
+): boolean {
+  switch (name) {
+    case "onClick":
+    case "onClickCapture":
+    case "onDoubleClick":
+    case "onDoubleClickCapture":
+    case "onMouseDown":
+    case "onMouseDownCapture":
+    case "onMouseMove":
+    case "onMouseMoveCapture":
+    case "onMouseUp":
+    case "onMouseUpCapture":
+    case "onMouseEnter":
+      return !!(props.disabled && isInteractive(type));
+    default:
+      return false;
+  }
+}
+
+export default function getListener(
+  inst: Fiber,
+  registrationName: string
+): Function | null {
+  const stateNode = inst.stateNode;
+  if (stateNode === null) return null;
+
+  // completeWork 儲存在 dom 上的 props
+  const props = getFiberCurrentPropsFromNode(stateNode);
+  if (props === null) return null;
+
+  const listener = props[registrationName];
+  // 檢查沒有被禁止
+  if (shouldPreventMouseEvent(registrationName, inst.type, props)) {
+    return null;
+  }
+  if (listener && typeof listener !== "function") {
+    throw new Error(
+      `expected ${registrationName} listener to be a function, instead got a value of ${typeof listener}`
+    );
+  }
+
+  return listener;
+}
+```
+
+執行 `processDispatchQueue`
+遍歷 `dispatchQueue`
+
+> react-dom-bindings/src/events/ReactDOMEventListener.ts
+
+```ts
+export function processDispatchQueue(
+  dispatchQueue: DispatchQueue,
+  eventSystemFlags: EventSystemFlags
+) {
+  // 是捕獲階段嗎
+  const inCapturePhase = (eventSystemFlags & IS_CAPTURE_PHASE) !== 0;
+  for (let i = 0; i < dispatchQueue.length; i++) {
+    const { event, listeners } = dispatchQueue[i];
+    processDispatchQueueItemsInOrder(event, listeners, inCapturePhase);
+  }
+}
+
+function processDispatchQueueItemsInOrder(
+  event: Event,
+  dispatchListeners: Array<DispatchListener>,
+  inCapturePhase: boolean
+) {
+  if (inCapturePhase) {
+    // 捕獲階段，由上往下執行
+    for (let i = dispatchListeners.length - 1; i >= 0; i--) {
+      const { instance, listener, currentTarget } = dispatchListeners[i];
+      executeDispatch(event, listener, currentTarget);
+    }
+  } else {
+    // 冒泡階段，由下往上執行
+    for (let i = 0; i < dispatchListeners.length; i++) {
+      const { instance, listener, currentTarget } = dispatchListeners[i];
+      executeDispatch(event, listener, currentTarget);
+    }
+  }
+}
+
+function executeDispatch(
+  event: Event,
+  listener: Function,
+  currentTarget: EventTarget
+) {
+  const type = event.type || "unknown-event";
+  // 執行加上錯誤處理
+  invokeGuardedCallbackAndCatchFirstError(type, listener, undefined, event);
+}
+```
+
+> shared/invokeGuardedCallbackAndCatchFirstError.ts
+
+```ts
+import invokeGuardedCallbackImpl from "./invokeGuardedCallbackImpl";
+
+// Used by Fiber to simulate a try-catch.
+let hasError = false;
+let caughtError = null;
+
+// Used by event system to capture/rethrow the first error.
+let hasRethrowError = false;
+let rethrowError = null;
+
+const reporter = {
+  onError(error) {
+    hasError = true;
+    caughtError = error;
+  },
+};
+
+/**
+ * Call a function while guarding against errors that happens within it.
+ * Returns an error if it throws, otherwise null.
+ *
+ * In production, this is implemented using a try-catch. The reason we don't
+ * use a try-catch directly is so that we can swap out a different
+ * implementation in DEV mode.
+ *
+ * @param {String} name of the guard to use for logging or debugging
+ * @param {Function} func The function to invoke
+ * @param {*} context The context to use when calling the function
+ * @param {...*} args Arguments for function
+ */
+export function invokeGuardedCallback(name, func, context, a, b, c, d, e, f) {
+  hasError = false;
+  caughtError = null;
+  invokeGuardedCallbackImpl.apply(reporter, arguments);
+}
+
+/**
+ * Same as invokeGuardedCallback, but instead of returning an error, it stores
+ * it in a global so it can be rethrown by `rethrowCaughtError` later.
+ * TODO: See if caughtError and rethrowError can be unified.
+ *
+ * @param {String} name of the guard to use for logging or debugging
+ * @param {Function} func The function to invoke
+ * @param {*} context The context to use when calling the function
+ * @param {...*} args Arguments for function
+ */
+export function invokeGuardedCallbackAndCatchFirstError<
+  A,
+  B,
+  C,
+  D,
+  E,
+  F,
+  Context
+>(
+  this,
+  name: string | null,
+  func: (a: A, b: B, c: C, d: D, e: E, f: F) => void,
+  context: Context,
+  a: A,
+  b: B,
+  c: C,
+  d: D,
+  e: E,
+  f: F
+) {
+  invokeGuardedCallback.apply(this, arguments);
+  if (hasError) {
+    const error = clearCaughtError();
+    if (!hasRethrowError) {
+      hasRethrowError = true;
+      rethrowError = error;
+    }
+  }
+}
+
+/**
+ * During execution of guarded functions we will capture the first error which
+ * we will rethrow to be handled by the top level error handler.
+ */
+export function rethrowCaughtError() {
+  if (hasRethrowError) {
+    const error = rethrowError;
+    hasRethrowError = false;
+    rethrowError = null;
+    throw error;
+  }
+}
+
+export function hasCaughtError() {
+  return hasError;
+}
+
+export function clearCaughtError() {
+  if (hasError) {
+    const error = caughtError;
+    hasError = false;
+    caughtError = null;
+    return error;
+  } else {
+    throw new Error(
+      "clearCaughtError was called but no error was captured. This error " +
+        "is likely caused by a bug in React. Please file an issue."
+    );
+  }
+}
+```
+
+> shared/invokeGuardedCallbackImpl.ts
+
+```ts
+export default function invokeGuardedCallbackImpl(
+  this: { onError: (error: any) => void },
+  name: string | null,
+  func: (...Args) => any,
+  context: any
+): void {
+  const funcArgs = Array.prototype.slice.call(arguments, 3);
+  try {
+    func.apply(context, funcArgs);
+  } catch (error) {
+    this.onError(error);
+  }
+}
+```
+
+##### 處理 Lane
+
+> react-reconciler/src/ReactEventPriorities.ts
+
+```ts
+import {
+  DefaultLane,
+  IdleLane,
+  InputContinuousLane,
+  Lane,
+  NoLane,
+  SyncLane,
+} from "./ReactFiberLane";
+
+export type EventPriority = Lane;
+
+export const DiscreteEventPriority: EventPriority = SyncLane;
+export const ContinuousEventPriority: EventPriority = InputContinuousLane;
+export const DefaultEventPriority: EventPriority = DefaultLane;
+export const IdleEventPriority: EventPriority = IdleLane;
+
+let currentUpdatePriority: EventPriority = NoLane;
+
+export function getCurrentUpdatePriority(): EventPriority {
+  return currentUpdatePriority;
+}
+
+export function setCurrentUpdatePriority(newPriority: EventPriority) {
+  currentUpdatePriority = newPriority;
+}
+```
+
+> react-dom-bindings/src/events/EventSystemFlags.ts
+
+```ts
+export type EventSystemFlags = number;
+
+export const IS_EVENT_HANDLE_NON_MANAGED_NODE = 1;
+// 有些事件不適合事件委託
+export const IS_NON_DELEGATED = 1 << 1;
+// 當前處於捕獲階段嗎
+export const IS_CAPTURE_PHASE = 1 << 2;
+export const IS_PASSIVE = 1 << 3;
+export const IS_LEGACY_FB_SUPPORT_MODE = 1 << 4;
+
+export const SHOULD_NOT_DEFER_CLICK_FOR_FB_SUPPORT_MODE =
+  IS_LEGACY_FB_SUPPORT_MODE | IS_CAPTURE_PHASE;
+
+export const SHOULD_NOT_PROCESS_POLYFILL_EVENT_PLUGINS =
+  IS_EVENT_HANDLE_NON_MANAGED_NODE | IS_NON_DELEGATED | IS_CAPTURE_PHASE;
+```
+
+目前為止完成了事件的綁定和派發，但不是合成事件
+
+```tsx
+<button
+  onClick={(e) => {
+    console.log("event---->還是dom原生事件", e);
+    setCount();
+  }}
+>
+  add
+</button>
+```
+
+#### 實現合成事件
+
+定義型別
+
+> react-dom-bindings/src/events/ReactSyntheticEventType.ts
+
+```ts
+import { Fiber } from "@mono/react-reconciler/src/ReactInternalTypes";
+
+type BaseSynctheticEvent = {
+  isPersistent: () => boolean;
+  isPropagationStopped: () => boolean;
+  _targetInst: Fiber;
+  nativeEvent: Event;
+  target?: any;
+  relatedTarget?: any;
+  type: string;
+  currentTarget: null | EventTarget;
+};
+
+// 已知的有效的合成事件
+export type KnownReactSynctheticEvent = BaseSynctheticEvent & {
+  _reactName: string;
+};
+
+// 比方寫了 react 不支持的事件
+export type UnknownReactSynctheticEvent = BaseSynctheticEvent & {
+  _reactName: string;
+};
+
+export type ReactSyntheticEvent =
+  | KnownReactSynctheticEvent
+  | UnknownReactSynctheticEvent;
+```
+
+合成事件在源碼當中，要兼容好幾種，這裡以 click 為例，
+
+```ts
+import { Fiber } from "@mono/react-reconciler/src/ReactInternalTypes";
+import { DOMEventName } from "../DOMEventNames";
+import {
+  registrySimpleEvents,
+  topLevelEventsToReactNames,
+} from "../DOMEventProperties";
+import {
+  accumulateSinglePhaseListeners,
+  AnyNativeEvent,
+  DispatchQueue,
+} from "../DOMPluginEventSystem";
+import { EventSystemFlags, IS_CAPTURE_PHASE } from "../EventSystemFlags";
+import { SyntheticEvent, SyntheticMouseEvent } from "../SyntheticEvent";
+
+function extractEvents(
+  dispatchQueue: DispatchQueue,
+  domEventName: DOMEventName,
+  targetInst: null | Fiber,
+  nativeEvent: AnyNativeEvent,
+  nativeEventTarget: null | EventTarget,
+  eventSystemFlags: EventSystemFlags,
+  targetContainer: EventTarget
+) {
+  // click -> onClick，從映射表把對應的 react 事件名拿出來
+  const reactName = topLevelEventsToReactNames.get(domEventName);
+  if (reactName === undefined) {
+    return;
+  }
+
+  let SyntheticEventCtor = SyntheticEvent;
+  let reactEventType = domEventName;
+  // 源碼中會去判斷各種事件給予對應的合成事件構造器，這邊先省略
+  switch (domEventName) {
+    case "click":
+      // Firefox creates a click event on right mouse clicks. This removes the
+      // unwanted click events.
+      // TODO: Fixed in https://phabricator.services.mozilla.com/D26793. Can
+      // probably remove.
+      if (nativeEvent.button === 2) {
+        return;
+      }
+    /* falls through */
+    case "auxclick":
+    case "dblclick":
+    case "mousedown":
+    case "mousemove":
+    case "mouseup":
+    // TODO: Disabled elements should not respond to mouse events
+    /* falls through */
+    case "mouseout":
+    case "mouseover":
+    case "contextmenu":
+      SyntheticEventCtor = SyntheticMouseEvent;
+      break;
+    default:
+      // Unknown event. This is used by createEventHandle.
+      break;
+  }
+
+  // 是捕獲階段嗎
+  const inCapturePhase = (eventSystemFlags & IS_CAPTURE_PHASE) !== 0;
+  // 如果是 scroll | scrollend 事件，只會在冒泡階段觸發
+  const accumulateTargetOnly =
+    !inCapturePhase &&
+    (domEventName === "scroll" || domEventName === "scrollend");
+  // 拿到綁在 react 上的方法
+  const listeners = accumulateSinglePhaseListeners(
+    targetInst,
+    reactName,
+    nativeEvent.type,
+    inCapturePhase,
+    accumulateTargetOnly,
+    nativeEvent
+  );
+
+  if (listeners.length > 0) {
+    const event = new SyntheticEventCtor(
+      reactName,
+      reactEventType,
+      null,
+      nativeEvent,
+      nativeEventTarget
+    );
+    dispatchQueue.push({ event, listeners });
+  }
+}
+
+export { registrySimpleEvents as registerEvents, extractEvents };
+```
+
+> react-dom-bindings/src/events/ReactDOMEventListener.ts
+
+```ts
+import { Fiber } from "@mono/react-reconciler/src/ReactInternalTypes";
+
+type EventInterfaceType = {
+  [propName: string]: 0 | ((event: { [propName: string]: any }) => any);
+};
+
+function functionThatReturnsTrue() {
+  return true;
+}
+
+function functionThatReturnsFalse() {
+  return false;
+}
+const assign = Object.assign;
+// This is intentionally a factory so that we have different returned constructors.
+// If we had a single constructor, it would be megamorphic and engines would deopt.
+function createSyntheticEvent(Interface) {
+  /**
+   * Synthetic events are dispatched by event plugins, typically in response to a
+   * top-level event delegation handler.
+   *
+   * These systems should generally use pooling to reduce the frequency of garbage
+   * collection. The system should check `isPersistent` to determine whether the
+   * event should be released into the pool after being dispatched. Users that
+   * need a persisted event should invoke `persist`.
+   *
+   * Synthetic events (and subclasses) implement the DOM Level 3 Events API by
+   * normalizing browser quirks. Subclasses do not necessarily have to implement a
+   * DOM interface; custom application-specific events can also subclass this.
+   */
+  // $FlowFixMe[missing-this-annot]
+  function SyntheticBaseEvent(
+    reactName,
+    reactEventType,
+    targetInst,
+    nativeEvent,
+    nativeEventTarget
+  ): void {
+    this._reactName = reactName;
+    this._targetInst = targetInst;
+    this.type = reactEventType;
+    this.nativeEvent = nativeEvent;
+    this.target = nativeEventTarget;
+    this.currentTarget = null;
+
+    for (const propName in Interface) {
+      if (!Interface.hasOwnProperty(propName)) {
+        continue;
+      }
+      const normalize = Interface[propName];
+      if (normalize) {
+        this[propName] = normalize(nativeEvent);
+      } else {
+        this[propName] = nativeEvent[propName];
+      }
+    }
+
+    const defaultPrevented =
+      nativeEvent.defaultPrevented != null
+        ? nativeEvent.defaultPrevented
+        : nativeEvent.returnValue === false;
+    if (defaultPrevented) {
+      this.isDefaultPrevented = functionThatReturnsTrue;
+    } else {
+      this.isDefaultPrevented = functionThatReturnsFalse;
+    }
+    this.isPropagationStopped = functionThatReturnsFalse;
+    return this;
+  }
+
+  // $FlowFixMe[prop-missing] found when upgrading Flow
+  assign(SyntheticBaseEvent.prototype, {
+    // $FlowFixMe[missing-this-annot]
+    preventDefault: function () {
+      this.defaultPrevented = true;
+      const event = this.nativeEvent;
+      if (!event) {
+        return;
+      }
+
+      if (event.preventDefault) {
+        event.preventDefault();
+        // $FlowFixMe[illegal-typeof] - flow is not aware of `unknown` in IE
+      } else if (typeof event.returnValue !== "unknown") {
+        event.returnValue = false;
+      }
+      this.isDefaultPrevented = functionThatReturnsTrue;
+    },
+
+    // $FlowFixMe[missing-this-annot]
+    stopPropagation: function () {
+      const event = this.nativeEvent;
+      if (!event) {
+        return;
+      }
+
+      if (event.stopPropagation) {
+        event.stopPropagation();
+        // $FlowFixMe[illegal-typeof] - flow is not aware of `unknown` in IE
+      } else if (typeof event.cancelBubble !== "unknown") {
+        // The ChangeEventPlugin registers a "propertychange" event for
+        // IE. This event does not support bubbling or cancelling, and
+        // any references to cancelBubble throw "Member not found".  A
+        // typeof check of "unknown" circumvents this issue (and is also
+        // IE specific).
+        event.cancelBubble = true;
+      }
+      // 檢查是不是有禁止冒泡
+      this.isPropagationStopped = functionThatReturnsTrue;
+    },
+
+    /**
+     * We release all dispatched `SyntheticEvent`s after each event loop, adding
+     * them back into the pool. This allows a way to hold onto a reference that
+     * won't be added back into the pool.
+     */
+    persist: function () {
+      // Modern event system doesn't use pooling.
+    },
+
+    /**
+     * Checks if this event should be released back into the pool.
+     *
+     * @return {boolean} True if this should not be released, false otherwise.
+     */
+    isPersistent: functionThatReturnsTrue,
+  });
+  return SyntheticBaseEvent;
+}
+/**
+ * Translation from modifier key to the associated property in the event.
+ * @see http://www.w3.org/TR/DOM-Level-3-Events/#keys-Modifiers
+ */
+const modifierKeyToProp = {
+  Alt: "altKey",
+  Control: "ctrlKey",
+  Meta: "metaKey",
+  Shift: "shiftKey",
+};
+
+// Older browsers (Safari <= 10, iOS Safari <= 10.2) do not support
+// getModifierState. If getModifierState is not supported, we map it to a set of
+// modifier keys exposed by the event. In this case, Lock-keys are not supported.
+// $FlowFixMe[missing-local-annot]
+// $FlowFixMe[missing-this-annot]
+function modifierStateGetter(keyArg) {
+  const syntheticEvent = this;
+  const nativeEvent = syntheticEvent.nativeEvent;
+  if (nativeEvent.getModifierState) {
+    return nativeEvent.getModifierState(keyArg);
+  }
+  const keyProp = modifierKeyToProp[keyArg];
+  return keyProp ? !!nativeEvent[keyProp] : false;
+}
+
+function getEventModifierState(nativeEvent) {
+  return modifierStateGetter;
+}
+/**
+ * @interface Event
+ * @see http://www.w3.org/TR/DOM-Level-3-Events/
+ */
+const EventInterface = {
+  eventPhase: 0,
+  bubbles: 0,
+  cancelable: 0,
+  timeStamp: function (event) {
+    return event.timeStamp || Date.now();
+  },
+  defaultPrevented: 0,
+  isTrusted: 0,
+};
+const UIEventInterface = {
+  ...EventInterface,
+  view: 0,
+  detail: 0,
+};
+
+let lastMovementX;
+let lastMovementY;
+let lastMouseEvent;
+
+function updateMouseMovementPolyfillState(event) {
+  if (event !== lastMouseEvent) {
+    if (lastMouseEvent && event.type === "mousemove") {
+      // $FlowFixMe[unsafe-arithmetic] assuming this is a number
+      lastMovementX = event.screenX - lastMouseEvent.screenX;
+      // $FlowFixMe[unsafe-arithmetic] assuming this is a number
+      lastMovementY = event.screenY - lastMouseEvent.screenY;
+    } else {
+      lastMovementX = 0;
+      lastMovementY = 0;
+    }
+    lastMouseEvent = event;
+  }
+}
+
+/**
+ * @interface MouseEvent
+ * @see http://www.w3.org/TR/DOM-Level-3-Events/
+ */
+const MouseEventInterface = {
+  ...UIEventInterface,
+  screenX: 0,
+  screenY: 0,
+  clientX: 0,
+  clientY: 0,
+  pageX: 0,
+  pageY: 0,
+  ctrlKey: 0,
+  shiftKey: 0,
+  altKey: 0,
+  metaKey: 0,
+  getModifierState: getEventModifierState,
+  button: 0,
+  buttons: 0,
+  relatedTarget: function (event) {
+    if (event.relatedTarget === undefined)
+      return event.fromElement === event.srcElement
+        ? event.toElement
+        : event.fromElement;
+
+    return event.relatedTarget;
+  },
+  movementX: function (event) {
+    if ("movementX" in event) {
+      return event.movementX;
+    }
+    updateMouseMovementPolyfillState(event);
+    return lastMovementX;
+  },
+  movementY: function (event) {
+    if ("movementY" in event) {
+      return event.movementY;
+    }
+    // Don't need to call updateMouseMovementPolyfillState() here
+    // because it's guaranteed to have already run when movementX
+    // was copied.
+    return lastMovementY;
+  },
+};
+export const SyntheticMouseEvent = createSyntheticEvent(MouseEventInterface);
+export const SyntheticEvent = createSyntheticEvent(EventInterface);
+```
+
+> react-dom-bindings/src/events/ReactDOMEventListener.ts
+
+```ts
+function processDispatchQueueItemsInOrder(
+  event: ReactSyntheticEvent,
+  dispatchListeners: Array<DispatchListener>,
+  inCapturePhase: boolean
+) {
+  let preInstance: Fiber | null = null;
+  if (inCapturePhase) {
+    // 捕獲階段，由上往下執行
+    for (let i = dispatchListeners.length - 1; i >= 0; i--) {
+      const { instance, listener, currentTarget } = dispatchListeners[i];
+      // 如果禁止冒泡傳播的話，要阻止
+      if (preInstance !== instance && event.isPropagationStopped()) {
+        return;
+      }
+      executeDispatch(event, listener, currentTarget);
+      preInstance = instance;
+    }
+  } else {
+    // 冒泡階段，由下往上執行
+    for (let i = 0; i < dispatchListeners.length; i++) {
+      const { instance, listener, currentTarget } = dispatchListeners[i];
+      // 如果禁止冒泡傳播的話，要阻止
+      if (preInstance !== instance && event.isPropagationStopped()) {
+        return;
+      }
+      executeDispatch(event, listener, currentTarget);
+      preInstance = instance;
+    }
+  }
+}
+```
+
+現在，tsx click 回調中的 event 都是合成事件了！

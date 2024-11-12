@@ -84,9 +84,24 @@ importers:
       '@mono/react':
         specifier: workspace:*
         version: link:../react
+      '@mono/react-dom-bindings':
+        specifier: workspace:*
+        version: link:../react-dom-bindings
       '@mono/react-reconciler':
         specifier: workspace:*
         version: link:../react-reconciler
+      '@mono/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  packages/react-dom-bindings:
+    dependencies:
+      '@mono/react-reconciler':
+        specifier: workspace:*
+        version: link:../react-reconciler
+      '@mono/scheduler':
+        specifier: workspace:*
+        version: link:../scheduler
       '@mono/shared':
         specifier: workspace:*
         version: link:../shared
@@ -96,6 +111,9 @@ importers:
       '@mono/react-dom':
         specifier: workspace:*
         version: link:../react-dom
+      '@mono/react-dom-bindings':
+        specifier: workspace:*
+        version: link:../react-dom-bindings
       '@mono/scheduler':
         specifier: workspace:*
         version: link:../scheduler

@@ -1,8 +1,8 @@
 {
-  "name": "@mono/react-reconciler",
+  "name": "@mono/react-dom-bindings",
   "version": "1.0.0",
   "description": "",
-  "main": "index.ts",
+  "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -12,7 +12,6 @@
   "dependencies": {
     "@mono/shared": "workspace:*",
     "@mono/scheduler": "workspace:*",
-    "@mono/react-dom": "workspace:*",
-    "@mono/react-dom-bindings": "workspace:*"
+    "@mono/react-reconciler": "workspace:*"
   }
 }
