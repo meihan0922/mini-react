@@ -15,6 +15,7 @@ import {
   precacheFiberNode,
   updateFiberProps,
 } from "../../react-dom-bindings/src/client/ReactDOMComponentTree";
+import { registrationNameDependencies } from "../../react-dom-bindings/src/events/EventRegistry";
 
 // 針對 workInProgress 創建真實 DOM
 export function completeWork(
@@ -101,8 +102,8 @@ function finalizeInitialChildren(
         domElement.textContent = "";
       }
     } else {
-      // 處理事件
-      if (propKey === "onClick") {
+      // 處理事件，如果是合成事件就略過
+      if (registrationNameDependencies[propKey]) {
         // 移除舊的click事件
         // domElement.removeEventListener("click", prevProp);
       } else {
@@ -125,9 +126,9 @@ function finalizeInitialChildren(
         domElement.textContent = `${nextProp}`;
       }
     } else {
-      // 處理事件
-      if (propKey === "onClick") {
-        domElement.addEventListener("click", nextProp);
+      // 處理事件，如果是合成事件就略過
+      if (registrationNameDependencies[propKey]) {
+        // domElement.addEventListener("click", nextProp);
       } else {
         domElement[propKey] = nextProp;
       }

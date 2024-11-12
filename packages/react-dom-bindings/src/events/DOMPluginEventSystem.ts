@@ -1,5 +1,6 @@
 // 不適合事件委託的文件
 import * as SimpleEventPlugin from "./plugins/SimpleEventPlugin";
+import * as ChangeEventPlugin from "./plugins/ChangeEventPlugin";
 import type { DOMEventName } from "./DOMEventNames";
 import { allNativeEvents } from "./EventRegistry";
 import { EventSystemFlags, IS_CAPTURE_PHASE } from "./EventSystemFlags";
@@ -80,7 +81,7 @@ export const nonDelegatedEvents: Set<DOMEventName> = new Set([
 // 不同類型的事件註冊
 SimpleEventPlugin.registerEvents();
 // EnterEventPlugin.registerEvents();
-// ChangeEventPlugin.registerEvents();
+ChangeEventPlugin.registerEvents();
 // SelectEventPlugin.registerEvents();
 // BeforeEventPlugin.registerEvents();
 
@@ -94,6 +95,15 @@ export function extractEvents(
   targetContainer: EventTarget
 ) {
   SimpleEventPlugin.extractEvents(
+    dispatchQueue,
+    domEventName,
+    targetInst,
+    nativeEvent,
+    nativeEventTarget,
+    eventSystemFlags,
+    targetContainer
+  );
+  ChangeEventPlugin.extractEvents(
     dispatchQueue,
     domEventName,
     targetInst,
@@ -190,7 +200,7 @@ export function accumulateSinglePhaseListeners(
     if (tag === HostComponent) {
       lastHostComponent = stateNode;
 
-      if (reactEventName !== null) {
+      if (reactEventName !== null && stateNode !== null) {
         const listener = getListener(instance, reactEventName);
 
         if (listener !== null) {
@@ -207,6 +217,44 @@ export function accumulateSinglePhaseListeners(
     if (accumulateTargetOnly) {
       break;
     }
+    instance = instance.return;
+  }
+  return listeners;
+}
+
+// 兩階段都支持
+export function accumulateTwoPhaseListeners(
+  targetFiber: null | Fiber,
+  reactName: string | null
+) {
+  const captureName = reactName !== null ? reactName + "Capture" : null;
+  let listeners: Array<DispatchListener> = [];
+  let instance = targetFiber;
+
+  while (instance !== null) {
+    const { stateNode, tag } = instance;
+    // 處理 HostComponents 原生標籤上的 listeners;
+    if (tag === HostComponent && stateNode !== null) {
+      const captureListener = getListener(instance, captureName as string);
+      const bubbleListener = getListener(instance, reactName as string);
+
+      if (captureListener !== null) {
+        listeners.unshift({
+          instance,
+          listener: captureListener,
+          currentTarget: stateNode,
+        });
+      }
+
+      if (bubbleListener !== null) {
+        listeners.push({
+          instance,
+          listener: bubbleListener,
+          currentTarget: stateNode,
+        });
+      }
+    }
+
     instance = instance.return;
   }
   return listeners;

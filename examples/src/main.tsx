@@ -47,28 +47,35 @@ class ClassChild extends Component {
 }
 
 function Comp() {
-  const [count, setCount] = useReducer((x) => x + 1, 1);
+  // const [count, setCount] = useReducer((x) => x + 1, 1);
+  const [text, setText] = useState("");
 
   return (
     // 2. 創建 Provider 組件，對後代對象組件進行傳遞 value
     <div>
-      <button
+      {/* <button
         onClick={(e) => {
           console.log("event---->", e);
           setCount();
         }}
       >
         add
-      </button>
-      <CountContext.Provider value={count}>
+      </button> */}
+      {/*<CountContext.Provider value={count}>
         <ClassChild />
-        {/* <ColorContext.Provider value="green">
+         <ColorContext.Provider value="green">
           <CountContext.Provider value={count + 1}>
             <Child />
           </CountContext.Provider>
         </ColorContext.Provider>
-        <Child /> */}
-      </CountContext.Provider>
+        <Child /> 
+      </CountContext.Provider>*/}
+      <input
+        type="text"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <p>{text}</p>
     </div>
   );
 }

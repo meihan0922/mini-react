@@ -12,6 +12,7 @@ import {
 import { EventSystemFlags, IS_CAPTURE_PHASE } from "../EventSystemFlags";
 import { SyntheticEvent, SyntheticMouseEvent } from "../SyntheticEvent";
 
+// 給 dispatchQueue 添加事件
 function extractEvents(
   dispatchQueue: DispatchQueue,
   domEventName: DOMEventName,

@@ -27,6 +27,7 @@ import { getClosestInstanceFromNode } from "../client/ReactDOMComponentTree";
 import { invokeGuardedCallbackAndCatchFirstError } from "@mono/shared/invokeGuardedCallbackAndCatchFirstError";
 import { ReactSyntheticEvent } from "./ReactSyntheticEventType";
 import { Fiber } from "@mono/react-reconciler/src/ReactInternalTypes";
+
 export function createEventListenerWrapperWithPriority(
   target: EventTarget,
   domEventName: DOMEventName,
@@ -115,7 +116,7 @@ function dispatchEvent(
     eventSystemFlags,
     target
   );
-
+  console.log(dispatchQueue);
   processDispatchQueue(dispatchQueue, eventSystemFlags);
 }
 

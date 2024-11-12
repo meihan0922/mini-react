@@ -70,6 +70,8 @@
           - [提取事件](#提取事件)
         - [處理 Lane](#處理-lane)
       - [實現合成事件](#實現合成事件)
+      - [受控事件](#受控事件)
+        - [實作 onChange](#實作-onchange)
 
 # mini-react
 
@@ -4326,6 +4328,22 @@ export function registerTwoPhaseEvent(
 }
 ```
 
+> react-reconciler/src/ReactFiberCompleteWork.ts
+> `finalizeInitialChildren`
+
+```ts
+// 省略
+
+// 處理事件，如果是合成事件就略過
+if (registrationNameDependencies[propKey]) {
+  // 移除舊的click事件
+  // domElement.removeEventListener("click", prevProp);
+} else {
+  // 省略
+}
+// 省略
+```
+
 回到 react-dom ，我們要把事件綁定在 root 上
 
 > react-dom/client/index.ts
@@ -4758,7 +4776,7 @@ export function accumulateSinglePhaseListeners(
     if (tag === HostComponent) {
       lastHostComponent = stateNode;
 
-      if (reactEventName !== null) {
+      if (reactEventName !== null && stateNode !== null) {
         const listener = getListener(instance, reactEventName);
 
         if (listener !== null) {
@@ -5501,3 +5519,207 @@ function processDispatchQueueItemsInOrder(
 ```
 
 現在，tsx click 回調中的 event 都是合成事件了！
+
+#### 受控事件
+
+受控組件是指組件的狀態交給 react 管理，確保 ui 和狀態一致性，使單向數據流更加明確，在表單控制時特別有用。非受控組件則是交給 DOM 本身管理，通常通過 ref 來訪問。
+
+```tsx
+function Comp() {
+  const [text, setText] = useState("");
+
+  return (
+    <div>
+      <input
+        type="text"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <p>{text}</p>
+    </div>
+  );
+}
+```
+
+##### 實作 onChange
+
+這邊只處理文本類型，其他先不考慮
+
+新增 `react-dom-bindings/src/events/plugins/ChangeEventPlugin.ts`
+
+```ts
+import { registerTwoPhaseEvent } from "../EventRegistry";
+import { Fiber } from "@mono/react-reconciler/src/ReactInternalTypes";
+import { DOMEventName } from "../DOMEventNames";
+import {
+  registrySimpleEvents,
+  topLevelEventsToReactNames,
+} from "../DOMEventProperties";
+import {
+  accumulateSinglePhaseListeners,
+  accumulateTwoPhaseListeners,
+  type AnyNativeEvent,
+  type DispatchQueue,
+} from "../DOMPluginEventSystem";
+import { EventSystemFlags, IS_CAPTURE_PHASE } from "../EventSystemFlags";
+import { SyntheticEvent, SyntheticMouseEvent } from "../SyntheticEvent";
+import isTextInputElement from "../isTextInputElement";
+
+function registerEvents() {
+  registerTwoPhaseEvent("onChange", [
+    "change",
+    "click",
+    "focusin",
+    "focusout",
+    "input",
+    "keydown",
+    "keyup",
+    "selectionchange",
+  ]);
+}
+// 給 dispatchQueue 添加事件
+function extractEvents(
+  dispatchQueue: DispatchQueue,
+  domEventName: DOMEventName,
+  targetInst: null | Fiber,
+  nativeEvent: AnyNativeEvent,
+  nativeEventTarget: null | EventTarget,
+  eventSystemFlags: EventSystemFlags,
+  targetContainer: EventTarget
+): void {
+  // TODO: 這邊只處理文本類型，其他先不考慮
+
+  const targetNode = targetInst?.stateNode || null;
+  if (isTextInputElement(targetNode)) {
+    if (domEventName === "input" || domEventName === "change") {
+      // 兩階段都支持
+      const listeners = accumulateTwoPhaseListeners(targetInst, "onChange");
+      if (listeners.length > 0) {
+        const event = new SyntheticEvent(
+          "onChange",
+          "change",
+          null,
+          nativeEvent,
+          nativeEventTarget
+        );
+
+        dispatchQueue.push({ event, listeners });
+      }
+    }
+  }
+}
+
+export { registerEvents, extractEvents };
+```
+
+新增`react-dom-bindings/src/events/isTextInputElement.ts`
+
+```ts
+const supportedInputTypes = {
+  color: true,
+  date: true,
+  datetime: true,
+  "datetime-local": true,
+  email: true,
+  month: true,
+  number: true,
+  password: true,
+  range: true,
+  search: true,
+  tel: true,
+  text: true,
+  time: true,
+  url: true,
+  week: true,
+};
+
+function isTextInputElement(elem) {
+  const nodeName = elem && elem.nodeName && elem.nodeName.toLowerCase();
+
+  if (nodeName === "input") {
+    return !!supportedInputTypes[elem.type];
+  }
+
+  if (nodeName === "textarea") {
+    return true;
+  }
+
+  return false;
+}
+
+export default isTextInputElement;
+```
+
+> react-dom-bindings/src/events/DOMPluginEventSystem.ts
+
+```ts
+// 不同類型的事件註冊
+SimpleEventPlugin.registerEvents();
+ChangeEventPlugin.registerEvents();
+// EnterEventPlugin.registerEvents();
+// SelectEventPlugin.registerEvents();
+// BeforeEventPlugin.registerEvents();
+
+export function extractEvents(
+  dispatchQueue: DispatchQueue,
+  domEventName: DOMEventName,
+  targetInst: null | Fiber,
+  nativeEvent: AnyNativeEvent,
+  nativeEventTarget: null | EventTarget,
+  eventSystemFlags: EventSystemFlags,
+  targetContainer: EventTarget
+) {
+  // 省略
+  ChangeEventPlugin.extractEvents(
+    dispatchQueue,
+    domEventName,
+    targetInst,
+    nativeEvent,
+    nativeEventTarget,
+    eventSystemFlags,
+    targetContainer
+  );
+
+  // TODO: 其他事件類型，這次就不實作了
+}
+
+// 兩階段都支持
+export function accumulateTwoPhaseListeners(
+  targetFiber: null | Fiber,
+  reactName: string | null
+) {
+  const captureName = reactName !== null ? reactName + "Capture" : null;
+  let listeners: Array<DispatchListener> = [];
+  let instance = targetFiber;
+
+  while (instance !== null) {
+    const { stateNode, tag } = instance;
+    // 處理 HostComponents 原生標籤上的 listeners;
+    if (tag === HostComponent && stateNode !== null) {
+      const captureListener = getListener(instance, captureName as string);
+      const bubbleListener = getListener(instance, reactName as string);
+
+      if (captureListener !== null) {
+        listeners.unshift({
+          instance,
+          listener: captureListener,
+          currentTarget: stateNode,
+        });
+      }
+
+      if (bubbleListener !== null) {
+        listeners.push({
+          instance,
+          listener: bubbleListener,
+          currentTarget: stateNode,
+        });
+      }
+    }
+
+    instance = instance.return;
+  }
+  return listeners;
+}
+```
+
+這樣就暫時簡單完成 受控組件 onChange 的實作了！
