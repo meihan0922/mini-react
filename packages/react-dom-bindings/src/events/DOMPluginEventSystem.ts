@@ -3,7 +3,11 @@ import * as SimpleEventPlugin from "./plugins/SimpleEventPlugin";
 import * as ChangeEventPlugin from "./plugins/ChangeEventPlugin";
 import type { DOMEventName } from "./DOMEventNames";
 import { allNativeEvents } from "./EventRegistry";
-import { EventSystemFlags, IS_CAPTURE_PHASE } from "./EventSystemFlags";
+import {
+  EventSystemFlags,
+  IS_CAPTURE_PHASE,
+  SHOULD_NOT_PROCESS_POLYFILL_EVENT_PLUGINS,
+} from "./EventSystemFlags";
 import { createEventListenerWrapperWithPriority } from "./ReactDOMEventListener";
 import {
   addEventBubbleListener,
@@ -103,15 +107,19 @@ export function extractEvents(
     eventSystemFlags,
     targetContainer
   );
-  ChangeEventPlugin.extractEvents(
-    dispatchQueue,
-    domEventName,
-    targetInst,
-    nativeEvent,
-    nativeEventTarget,
-    eventSystemFlags,
-    targetContainer
-  );
+
+  // 在捕獲階段要處理回調
+  if ((eventSystemFlags & SHOULD_NOT_PROCESS_POLYFILL_EVENT_PLUGINS) === 0) {
+    ChangeEventPlugin.extractEvents(
+      dispatchQueue,
+      domEventName,
+      targetInst,
+      nativeEvent,
+      nativeEventTarget,
+      eventSystemFlags,
+      targetContainer
+    );
+  }
 
   // TODO: 其他事件類型，這次就不實作了
 }
@@ -170,11 +178,24 @@ function addTrappedEventListener(
     eventSystemFlags
   );
 
+  let isPassiveListener = false;
+  /** 在行動網頁中，我們常用的就是touch系列的事件，如：touchstart, touchmove, touchend。無法事先知道一個監聽器會不會呼叫preventDefault()，它需要等監聽器執行完成後，再去執行預設行為，而監聽器執行是要運行的，這樣就會導致頁面卡頓。不知道你是否有阻止預設事件，所以會先不滾動而先處理監聽函數，然後才知道是否要滾動；
+所以我們需要主動告訴瀏覽器，我是否設定事件處理函數來阻止預設事件 **/
+  // react 就不在將他們綁定到 document 上，但現在改變這一點將會撤銷之前的性能優勢，
+  // 因此，要在根節點上手動的模擬現有的行為
+  if (
+    domEventName === "touchstart" ||
+    domEventName === "touchmove" ||
+    domEventName === "wheel"
+  ) {
+    isPassiveListener = true;
+  }
+
   // ! 2. 綁定事件
   if (isCapturePhaseListener) {
-    addEventCaptureListener(target, domEventName, listener);
+    addEventCaptureListener(target, domEventName, listener, isPassiveListener);
   } else {
-    addEventBubbleListener(target, domEventName, listener);
+    addEventBubbleListener(target, domEventName, listener, isPassiveListener);
   }
 }
 
@@ -237,16 +258,16 @@ export function accumulateTwoPhaseListeners(
     if (tag === HostComponent && stateNode !== null) {
       const captureListener = getListener(instance, captureName as string);
       const bubbleListener = getListener(instance, reactName as string);
-
-      if (captureListener !== null) {
+      // captureListener 有可能是 undefined
+      if (captureListener !== null && captureListener !== undefined) {
         listeners.unshift({
           instance,
           listener: captureListener,
           currentTarget: stateNode,
         });
       }
-
-      if (bubbleListener !== null) {
+      // bubbleListener 有可能是 undefined
+      if (bubbleListener !== null && bubbleListener !== undefined) {
         listeners.push({
           instance,
           listener: bubbleListener,

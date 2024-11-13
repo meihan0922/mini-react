@@ -1,18 +1,26 @@
 export function addEventBubbleListener(
   target: EventTarget,
   eventType: string,
-  listener: Function
+  listener: Function,
+  passive: boolean
 ) {
-  target.addEventListener(eventType, listener as any, false);
+  target.addEventListener(eventType, listener as any, {
+    passive,
+    capture: false,
+  });
   return listener;
 }
 
 export function addEventCaptureListener(
   target: EventTarget,
   eventType: string,
-  listener: Function
+  listener: Function,
+  passive: boolean
 ) {
-  target.addEventListener(eventType, listener as any, true);
+  target.addEventListener(eventType, listener as any, {
+    passive,
+    capture: true,
+  });
   return listener;
 }
 

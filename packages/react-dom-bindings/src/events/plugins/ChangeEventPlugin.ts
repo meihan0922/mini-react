@@ -41,6 +41,9 @@ function extractEvents(
 
   const targetNode = targetInst?.stateNode || null;
   if (isTextInputElement(targetNode)) {
+    // 因為沒實現blur，會再觸發
+    const inst = getInstIfValueChanged(targetInst as Fiber, targetNode);
+    if (!inst) return;
     if (domEventName === "input" || domEventName === "change") {
       const listeners = accumulateTwoPhaseListeners(targetInst, "onChange");
       if (listeners.length > 0) {
@@ -56,6 +59,16 @@ function extractEvents(
       }
     }
   }
+}
+
+// 源碼當中 實現的複雜很多會再返回 targetInst 再判斷
+function getInstIfValueChanged(
+  targetInst: null | Fiber,
+  targetNode: HTMLInputElement
+): boolean {
+  const oldValue = targetInst?.pendingProps.value;
+  const newValue = targetNode.value;
+  return oldValue !== newValue;
 }
 
 export { registerEvents, extractEvents };

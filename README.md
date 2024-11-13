@@ -4419,6 +4419,19 @@ function addTrappedEventListener(
     eventSystemFlags
   );
 
+  let isPassiveListener = false;
+  /** 在行動網頁中，我們常用的就是touch系列的事件，如：touchstart, touchmove, touchend。無法事先知道一個監聽器會不會呼叫preventDefault()，它需要等監聽器執行完成後，再去執行預設行為，而監聽器執行是要運行的，這樣就會導致頁面卡頓。不知道你是否有阻止預設事件，所以會先不滾動而先處理監聽函數，然後才知道是否要滾動；
+所以我們需要主動告訴瀏覽器，我是否設定事件處理函數來阻止預設事件 **/
+  // react 就不在將他們綁定到 document 上，但現在改變這一點將會撤銷之前的性能優勢，
+  // 因此，要在根節點上手動的模擬現有的行為
+  if (
+    domEventName === "touchstart" ||
+    domEventName === "touchmove" ||
+    domEventName === "wheel"
+  ) {
+    isPassiveListener = true;
+  }
+
   // ! 2. 綁定事件
   if (isCapturePhaseListener) {
     addEventCaptureListener(target, domEventName, listener);
@@ -4434,18 +4447,26 @@ function addTrappedEventListener(
 export function addEventBubbleListener(
   target: EventTarget,
   eventType: string,
-  listener: Function
+  listener: Function,
+  passive: boolean
 ) {
-  target.addEventListener(eventType, listener as any, false);
+  target.addEventListener(eventType, listener as any, {
+    passive,
+    capture: false,
+  });
   return listener;
 }
 
 export function addEventCaptureListener(
   target: EventTarget,
   eventType: string,
-  listener: Function
+  listener: Function,
+  passive: boolean
 ) {
-  target.addEventListener(eventType, listener as any, true);
+  target.addEventListener(eventType, listener as any, {
+    passive,
+    capture: true,
+  });
   return listener;
 }
 
@@ -5089,7 +5110,7 @@ export const IS_LEGACY_FB_SUPPORT_MODE = 1 << 4;
 
 export const SHOULD_NOT_DEFER_CLICK_FOR_FB_SUPPORT_MODE =
   IS_LEGACY_FB_SUPPORT_MODE | IS_CAPTURE_PHASE;
-
+// 要不要處理 plugin
 export const SHOULD_NOT_PROCESS_POLYFILL_EVENT_PLUGINS =
   IS_EVENT_HANDLE_NON_MANAGED_NODE | IS_NON_DELEGATED | IS_CAPTURE_PHASE;
 ```
@@ -5591,6 +5612,9 @@ function extractEvents(
 
   const targetNode = targetInst?.stateNode || null;
   if (isTextInputElement(targetNode)) {
+    // 因為沒實現blur，會再觸發
+    const inst = getInstIfValueChanged(targetInst as Fiber, targetNode);
+    if (!inst) return;
     if (domEventName === "input" || domEventName === "change") {
       // 兩階段都支持
       const listeners = accumulateTwoPhaseListeners(targetInst, "onChange");
