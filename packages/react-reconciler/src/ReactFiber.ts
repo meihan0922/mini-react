@@ -2,6 +2,7 @@ import { ReactElement, ReactFragment } from "../../shared/ReactTypes";
 import {
   REACT_CONTEXT_TYPE,
   REACT_FRAGMENT_TYPE,
+  REACT_MEMO_TYPE,
   REACT_PROVIDER_TYPE,
 } from "../../shared/ReactSymbols";
 import { isFn, isStr } from "../../shared/utils";
@@ -15,6 +16,7 @@ import {
   HostRoot,
   HostText,
   IndeterminateComponent,
+  MemoComponent,
   WorkTag,
 } from "./ReactWorkTags";
 import type { Fiber } from "./ReactInternalTypes";
@@ -149,6 +151,8 @@ export function createFiberFromTypeAndProps(
     fiberTag = ContextProvider;
   } else if (type.$$typeof === REACT_CONTEXT_TYPE) {
     fiberTag = ContextConsumer;
+  } else if (type.$$typeof === REACT_MEMO_TYPE) {
+    fiberTag = MemoComponent;
   }
   const fiber = createFiber(fiberTag, pendingProps, key);
   fiber.elementType = type;
@@ -179,4 +183,12 @@ export function createFiberFromText(content: string): Fiber {
 function shouldConstruct(Component: Function) {
   const prototype = Component.prototype;
   return !!(prototype && prototype?.isReactComponent);
+}
+
+export function isSimpleFunctionComponent(type: any): boolean {
+  return (
+    typeof type === "function" &&
+    !shouldConstruct(type) &&
+    type.defaultProps === undefined
+  );
 }

@@ -9,6 +9,7 @@ import {
   HostComponent,
   HostRoot,
   HostText,
+  SimpleMemoComponent,
 } from "./ReactWorkTags";
 import { popProvider } from "./ReactFiberNewContext";
 import {
@@ -28,6 +29,7 @@ export function completeWork(
     case HostRoot:
     case Fragment:
     case ClassComponent:
+    case SimpleMemoComponent:
     case FunctionComponent:
     case ContextConsumer: {
       return null;

@@ -83,6 +83,8 @@
     - [useTransition: 某一個操作變成 transition](#usetransition-某一個操作變成-transition)
     - [useDeferredValue: 相當於參數版本的 transitions](#usedeferredvalue-相當於參數版本的-transitions)
       - [模擬 useDeferredValue](#模擬-usedeferredvalue)
+  - [memo: 允許你的組件在某些情況下跳過渲染](#memo-允許你的組件在某些情況下跳過渲染)
+    - [模擬 memo](#模擬-memo)
 
 # mini-react
 
@@ -6312,4 +6314,196 @@ function getHighestPriorityLanes(lanes: Lanes | Lane): Lanes {
       return lanes;
   }
 }
+```
+
+## memo: 允許你的組件在某些情況下跳過渲染
+
+```tsx
+//  arePropsEqual 接收兩個參數：prevProps, nextProps
+const MemorizedComponent = memo(SomeComponent, arePropsEqual?);
+```
+
+- 沒有定義 `arePropsEqual`：會自動檢查 props 有沒有改變（`Object.is`），來跳過更新。
+- 有定義 `arePropsEqual`：如果返回 true，則跳過更新。
+
+### 模擬 memo
+
+> react/src/ReactMemo.ts
+
+```ts
+import { REACT_MEMO_TYPE } from "@mono/shared/ReactSymbols";
+
+export function memo<Props>(
+  type: any,
+  compare?: (oldProps: Props, newProps: Props) => boolean
+) {
+  const elementType = {
+    $$typeof: REACT_MEMO_TYPE,
+    type, //組件
+    compare: compare === undefined ? null : compare,
+  };
+
+  return elementType;
+}
+```
+
+> react-reconciler/src/ReactFiber.ts
+
+```ts
+export function createFiberFromTypeAndProps(
+  type: any,
+  key: null | string,
+  pendingProps: any,
+  lanes: Lanes = NoLanes
+): Fiber {
+  // 省略
+  if (isFn(type)) {
+    // 省略
+  } else if (type.$$typeof === REACT_MEMO_TYPE) {
+    fiberTag = MemoComponent;
+  }
+  // 省略
+}
+
+export function isSimpleFunctionComponent(type: any): boolean {
+  return (
+    typeof type === "function" &&
+    !shouldConstruct(type) &&
+    type.defaultProps === undefined
+  );
+}
+```
+
+> react-reconciler/src/ReactFiberBeginWork.ts
+
+```ts
+export function beginWork(
+  current: Fiber | null,
+  workInProgress: Fiber
+): Fiber | null {
+  switch (workInProgress.tag) {
+    // 省略
+    case MemoComponent:
+      return updateMemoComponent(current, workInProgress);
+    case SimpleMemoComponent:
+      return updateSimpleMemoComponent(current, workInProgress);
+  }
+  // TODO:
+  throw new Error(`beginWork 有標籤沒有處理到 - ${workInProgress.tag}`);
+}
+
+function updateMemoComponent(current: Fiber | null, workInProgress: Fiber) {
+  const Component = workInProgress.type;
+  const type = Component.type;
+  // 組件是不是初次渲染？
+  if (current === null) {
+    // 是最簡單的 memo 的函式組件，因為 memo 可以包裹 forwardRef 等的組件
+    if (
+      isSimpleFunctionComponent(type) &&
+      Component.compare === null &&
+      Component.defaultProps === undefined
+    ) {
+      workInProgress.type = type;
+      workInProgress.tag = SimpleMemoComponent;
+      return updateSimpleMemoComponent(current, workInProgress);
+    }
+
+    const child = createFiberFromTypeAndProps(
+      type,
+      null,
+      workInProgress.pendingProps
+    );
+    child.return = workInProgress;
+    workInProgress.child = child;
+    return child;
+  }
+  let compare = Component.compare;
+  compare = compare !== null ? compare : shallowEqual;
+  if (shallowEqual(current?.memoizedProps, workInProgress.pendingProps)) {
+    return bailoutOnAlreadyFinishedWork();
+  }
+  const newChild = createWorkInProgress(
+    current.child as Fiber,
+    workInProgress.pendingProps
+  );
+  newChild.return = workInProgress;
+  workInProgress.child = newChild;
+  return newChild;
+}
+
+function updateSimpleMemoComponent(
+  current: Fiber | null,
+  workInProgress: Fiber
+) {
+  if (current !== null) {
+    if (shallowEqual(current?.memoizedProps, workInProgress.pendingProps)) {
+      // 退出渲染，復用
+      return bailoutOnAlreadyFinishedWork();
+    }
+  }
+  return updateFunctionComponent(current, workInProgress);
+}
+
+function bailoutOnAlreadyFinishedWork() {
+  return null;
+}
+```
+
+> shared/shallowEqual.ts
+
+```ts
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ *
+ */
+
+import is from "./objectIs";
+import hasOwnProperty from "./hasOwnProperty";
+
+/**
+ * Performs equality by iterating through keys on an object and returning false
+ * when any key has values which are not strictly equal between the arguments.
+ * Returns true when the values of all keys are strictly equal.
+ */
+function shallowEqual(objA, objB) {
+  if (is(objA, objB)) {
+    return true;
+  }
+
+  if (
+    typeof objA !== "object" ||
+    objA === null ||
+    typeof objB !== "object" ||
+    objB === null
+  ) {
+    return false;
+  }
+
+  const keysA = Object.keys(objA);
+  const keysB = Object.keys(objB);
+
+  if (keysA.length !== keysB.length) {
+    return false;
+  }
+
+  // Test for A's keys different from B.
+  for (let i = 0; i < keysA.length; i++) {
+    const currentKey = keysA[i];
+    if (
+      !hasOwnProperty.call(objB, currentKey) ||
+      // $FlowFixMe[incompatible-use] lost refinement of `objB`
+      !is(objA[currentKey], objB[currentKey])
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export default shallowEqual;
 ```
