@@ -56,7 +56,9 @@ export type Fiber = {
   // Singly linked list fast path to the next fiber with side-effects.
   nextEffect: Fiber | null;
 
+  // Lanes 模型
   lanes: Lanes;
+  // 子節點的lanes
   childLanes: Lanes;
 
   // This is a pooled version of a Fiber. Every fiber that gets updated will
@@ -88,6 +90,7 @@ export type FiberRoot = {
   eventTimes: LaneMap<number>;
   expirationTimes: LaneMap<number>;
 
+  // 未處理的 lanes
   pendingLanes: Lanes;
   suspendedLanes: Lanes;
   pingedLanes: Lanes;

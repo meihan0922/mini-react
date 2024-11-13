@@ -1,10 +1,21 @@
 import { isFn } from "@mono/shared/utils";
-import { scheduleUpdateOnFiber } from "./ReactFiberWorkLoop";
+import {
+  requestDeferredLane,
+  scheduleUpdateOnFiber,
+} from "./ReactFiberWorkLoop";
 import type { Fiber, FiberRoot } from "./ReactInternalTypes";
 import { HostRoot } from "./ReactWorkTags";
 import { Flags, Passive, Update } from "./ReactFiberFlags";
 import { HookFlags, HookLayout, HookPassive } from "./ReactHookEffectTags";
 import { readContext } from "./ReactFiberNewContext";
+import {
+  includesNonIdleWork,
+  includesOnlyNonUrgentLanes,
+  Lanes,
+  mergeLanes,
+  NoLane,
+  NoLanes,
+} from "./ReactFiberLane";
 
 type Hook = {
   memorizedState: any;
@@ -19,13 +30,17 @@ type Effect = {
 let currentlyRenderingFiber: Fiber | null = null;
 let workInProgressHook: Hook | null = null;
 let currentHook: Hook | null = null;
+let renderLanes: Lanes = NoLanes;
 
 export function renderWithHook(
   current: Fiber | null,
   workInProgress: Fiber,
   component: any,
   props: any
+  // nextRenderLanes: Lanes
 ) {
+  // renderLanes = nextRenderLanes;
+
   currentlyRenderingFiber = workInProgress;
   workInProgress.memoizedState = null;
   workInProgress.updateQueue = null;
@@ -286,4 +301,38 @@ export function useContext(context: any) {
   // 如何找到最近的 Provider 的值呢？
   // 因為有可能 一樣的provider 包兩層，但 default 不一樣呀
   return readContext(context);
+}
+
+export function useDeferredValue<T>(value: T): T {
+  const hook = updateWorkInProgressHook();
+  const prevValue: T = hook.memorizedState;
+
+  if (currentHook !== null) {
+    // 更新階段
+    if (Object.is(value, prevValue)) {
+      // 傳入的值和當前渲染的值是相同的，因此可以快速的 bailout
+      return value;
+    } else {
+      // 收到一個與當前數據值不相同的新值
+      // 不只有包含非緊急更新
+      // renderLanes 還沒有實現，他應該要在 renderWithHooks 時傳入改變
+      const shouldDeferValue = !includesOnlyNonUrgentLanes(renderLanes);
+      if (shouldDeferValue) {
+        const defferredLane = requestDeferredLane();
+        currentlyRenderingFiber!.lanes = mergeLanes(
+          currentlyRenderingFiber!.lanes, //0
+          defferredLane // 128
+        );
+
+        // 復用之前的數值，不需要將其標記為一個 update，因為我們沒有渲染新值
+        return prevValue;
+      } else {
+        // 只包含非緊急更新，沒有其他緊急的更新了，這個時候執行這個非緊急更新就好
+        hook.memorizedState = value;
+        return value;
+      }
+    }
+  }
+  hook.memorizedState = value;
+  return value;
 }

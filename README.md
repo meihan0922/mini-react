@@ -72,6 +72,17 @@
       - [實現合成事件](#實現合成事件)
       - [受控事件](#受控事件)
         - [實作 onChange](#實作-onchange)
+  - [Lane 模型](#lane-模型)
+    - [lanes 和 lane 的基本運算函式和類型](#lanes-和-lane-的基本運算函式和類型)
+    - [Lanes 模型背景](#lanes-模型背景)
+    - [Lanes 模型應用場景](#lanes-模型應用場景)
+      - [Update 的 Lane](#update-的-lane)
+      - [事件優先級](#事件優先級)
+      - [調度更新 scheduleUpdateOnFiber](#調度更新-scheduleupdateonfiber)
+  - [transition](#transition)
+    - [useTransition: 某一個操作變成 transition](#usetransition-某一個操作變成-transition)
+    - [useDeferredValue: 相當於參數版本的 transitions](#usedeferredvalue-相當於參數版本的-transitions)
+      - [模擬 useDeferredValue](#模擬-usedeferredvalue)
 
 # mini-react
 
@@ -5633,6 +5644,16 @@ function extractEvents(
   }
 }
 
+// 源碼當中 實現的複雜很多會再返回 targetInst 再判斷
+function getInstIfValueChanged(
+  targetInst: null | Fiber,
+  targetNode: HTMLInputElement
+): boolean {
+  const oldValue = targetInst?.pendingProps.value;
+  const newValue = targetNode.value;
+  return oldValue !== newValue;
+}
+
 export { registerEvents, extractEvents };
 ```
 
@@ -5694,15 +5715,18 @@ export function extractEvents(
   targetContainer: EventTarget
 ) {
   // 省略
-  ChangeEventPlugin.extractEvents(
-    dispatchQueue,
-    domEventName,
-    targetInst,
-    nativeEvent,
-    nativeEventTarget,
-    eventSystemFlags,
-    targetContainer
-  );
+  // 在捕獲階段要處理回調
+  if ((eventSystemFlags & SHOULD_NOT_PROCESS_POLYFILL_EVENT_PLUGINS) === 0) {
+    ChangeEventPlugin.extractEvents(
+      dispatchQueue,
+      domEventName,
+      targetInst,
+      nativeEvent,
+      nativeEventTarget,
+      eventSystemFlags,
+      targetContainer
+    );
+  }
 
   // TODO: 其他事件類型，這次就不實作了
 }
@@ -5723,22 +5747,22 @@ export function accumulateTwoPhaseListeners(
       const captureListener = getListener(instance, captureName as string);
       const bubbleListener = getListener(instance, reactName as string);
 
-      if (captureListener !== null) {
+      // captureListener 有可能是 undefined
+      if (captureListener !== null && captureListener !== undefined) {
         listeners.unshift({
           instance,
           listener: captureListener,
           currentTarget: stateNode,
         });
       }
-
-      if (bubbleListener !== null) {
+      // bubbleListener 有可能是 undefined
+      if (bubbleListener !== null && bubbleListener !== undefined) {
         listeners.push({
           instance,
           listener: bubbleListener,
           currentTarget: stateNode,
         });
       }
-    }
 
     instance = instance.return;
   }
@@ -5747,3 +5771,545 @@ export function accumulateTwoPhaseListeners(
 ```
 
 這樣就暫時簡單完成 受控組件 onChange 的實作了！
+
+## Lane 模型
+
+在講 lane 模型之前，會提到位運算。位運算速度比乘除要快很多，功率較小，資源使用較少
+主要的操作有幾種：
+
+1. AND(`&`): 對應位置上的位只有當兩個數字的該位都為 1 時，結果才為 1，否則為 0。可以理解為提取都有的。
+
+```
+  5 & 3
+  0101 (5)
+  0011 (3)
+  ----
+  0001 // 結果是 1，因為只有最後一位兩個數字都是 1。
+```
+
+2. OR(`|`): 對應位置上的位只要其中一個數字的該位是 1，結果就為 1，只有當兩個數字的該位都為 0 時，結果才是 0。可以理解有就是存在。
+
+```
+  5 | 3
+  0101 (5)
+  0011 (3)
+  ----
+  0111 // 結果是 7，因為任何位置只要有一個 1 就為 1。
+```
+
+3. XOR(`^`): 對應位置上的位如果兩個數字的該位不同，則結果為 1，如果相同則結果為 0。都存在就歸零。排除共同存在。
+
+```
+  5 ^ 3
+  0101 (5)
+  0011 (3)
+  ----
+  0110 (6) // 結果是 6，因為只有第二位和第三位是不同的。
+```
+
+4. NOT(`~`): 這是一個單目運算符，對數字進行按位反轉，即 0 變 1，1 變 0。需要注意，~ 操作是按位取反，並且會受到數字的二進制表示方式（補碼）影響。
+
+```
+~5
+0101 (5)
+----
+1010 (-6)  // 以 32 位來說，這會轉成負數
+```
+
+5. 左移(`<<`): 將數字的所有位向左移動指定的位數，右側補 0。這相當於將數字乘以 2 的幾次方。
+
+```
+5 << 1
+0101 (5)
+----
+1010 (10) // 結果是 10，因為 5 乘以 2。
+```
+
+6. 右移(`>>`): 將數字的所有位向右移動指定的位數。左側補 0（對於正數）或者補充符號位（對於負數）。
+
+```
+0101 (5)
+----
+0010 (2) // 結果是 2，因為 5 右移一位相當於整數除以 2。
+```
+
+react 當中在 lanes、fiber 的 Flags、HookFlags、ReactFiberWorkLoop.js 中紀錄上下文環境的 ExecutionContext 都有用到二進制。
+
+想想看要是沒有使用位運算，要重複檢查是否存在，甚至需要遍歷。
+
+### lanes 和 lane 的基本運算函式和類型
+
+> react-reconciler/src/ReactFiberLane.ts
+
+```ts
+export type Lanes = number;
+export type Lane = number;
+export type LaneMap<T> = Array<T>;
+// 緊急更新
+export const SyncUpdateLanes: Lane =
+  SyncLane | InputContinuousLane | DefaultLane;
+```
+
+```ts
+export function getNextLanes(root: FiberRoot, wipLanes: Lanes): Lanes {
+  const pendingLanes = root.pendingLanes;
+  if (pendingLanes === NoLanes) {
+    return NoLanes;
+  }
+
+  let nextLanes = getHighestPriorityLanes(pendingLanes);
+  if (nextLanes === NoLanes) {
+    return NoLanes;
+  }
+
+  // 如果我們已經在 render 階段，切換 lanes 會中斷當前的渲染進程，導致進度丟失
+  // 只有當新的 lanes 優先及更高時，才應該切換 lane
+  if (wipLanes !== NoLanes && wipLanes !== nextLanes) {
+    const nextLane = getHighestPriorityLane(nextLanes);
+    const wipLane = getHighestPriorityLane(wipLanes);
+    if (
+      nextLane >= wipLane ||
+      // Default 優先級的更新不應該中斷 transition。
+      // Default 和 transition 的唯一區別是在於前者不支持刷新過度
+      (nextLane === DefaultLane && (wipLane & TransitionLanes) !== NoLanes)
+    ) {
+      // 繼續完成進行中的
+      return wipLanes;
+    }
+  }
+  return nextLanes;
+}
+
+export function markRootUpdated(
+  root: FiberRoot,
+  updateLane: Lane,
+  eventTime: number
+) {
+  root.pendingLanes |= updateLane;
+
+  const eventTimes = root.eventTimes;
+  const index = laneToIndex(updateLane);
+
+  eventTimes[index] = eventTime;
+}
+
+function pickArbitraryLaneIndex(lanes: Lanes) {
+  return 31 - Math.clz32(lanes);
+}
+
+function laneToIndex(lane: Lane) {
+  return pickArbitraryLaneIndex(lane);
+}
+
+export function createLaneMap<T>(initial: T): LaneMap<T> {
+  // Intentionally pushing one by one.
+  // https://v8.dev/blog/elements-kinds#avoid-creating-holes
+  const laneMap: T[] = [];
+  for (let i = 0; i < TotalLanes; i++) {
+    laneMap.push(initial);
+  }
+  return laneMap;
+}
+
+let nextTransitionLane: Lane = TransitionLane1;
+
+// 獲取優先等級最高的 lane。在 lane 中 值越小優先等級越高
+// 獲取最低位的1，比方 4194240 & -4194240 -> 64
+// 負數源碼會轉換成補碼的方法，符號位置保持不變，數值按位子求反，末位加一
+export function getHighestPriorityLane(lanes: Lanes): Lane {
+  return lanes & -lanes;
+}
+
+// 合併 lanes，聯集
+export function mergeLanes(a: Lanes | Lane, b: Lanes | Lane): Lanes {
+  return a | b;
+}
+
+// 對應到 某些空閒任務
+export function includesNonIdleWork(lanes: Lanes) {
+  return (lanes & NonIdleLanes) !== NoLanes;
+}
+
+export function isTransitionLane(lane: Lane): boolean {
+  // 提取都有的，也就是 TransitionLanes 的車道（位元）位置有值
+  return (lane & TransitionLanes) !== NoLanes;
+}
+
+export function includesSomeLane(a: Lanes | Lane, b: Lanes | Lane): boolean {
+  // 提取都有的，取交集
+  return (a & b) !== NoLanes;
+}
+
+// set 是否包含 subset，和 includesSomeLane，是檢查 set 是不是有 subset 這個子集
+export function isSubsetOfLanes(set: Lanes, subset: Lanes | Lane): boolean {
+  return (set & subset) === subset;
+}
+
+// ~: 對數字進行按位反轉，即 0 變 1，1 變 0。
+// 再聯集就會是去除
+export function removeLanes(set: Lanes, subset: Lanes | Lane): Lanes {
+  return set & ~subset;
+}
+
+// 是不是只有包含非緊急更新？
+export function includesOnlyNonUrgentLanes(lanes: Lanes): boolean {
+  const UrgentLanes = SyncLane | InputContinuousLane | DefaultLane;
+  return (lanes & UrgentLanes) === NoLanes;
+}
+
+// 找下一個 TransitionLane
+export function claimNextTransitionLane(): Lane {
+  const lane = nextTransitionLane;
+  nextTransitionLane <<= 1; // 左移
+  // 到盡頭，都用完了，就重新回到 TransitionLane1
+  if ((nextTransitionLane & TransitionLanes) === NoLanes) {
+    nextTransitionLane = TransitionLane1;
+  }
+  return lane;
+}
+```
+
+### Lanes 模型背景
+
+一個位掩碼可以標記一個任務(Lane)或是批量任務(Lanes)，react v17 開始正式採用 Lanes 模型，以前是用十進制的 expirationTime。 Lanes 比較適合處理批量任務。
+
+```ts
+const isTaskIncludedInBatch = (task & batchOfTasks) !== 0;
+```
+
+### Lanes 模型應用場景
+
+#### Update 的 Lane
+
+> react-reconciler/src/ReactFiberClassUpdateQueue.ts
+
+```ts
+export type Update<State> = {
+  eventTime: number;
+  lane: Lane;
+  tag:
+    | typeof UpdateState
+    | typeof ReplaceState
+    | typeof ForceUpdate
+    | typeof CaptureUpdate;
+  payload: any;
+  callback: (() => any) | null;
+  next: Update<State> | null;
+};
+
+export type SharedQueue<State> = {
+  pending: Update<State> | null;
+  lanes: Lanes;
+  hiddenCallbacks: Array<() => any> | null;
+};
+
+export type UpdateQueue<State> = {
+  baseState: State;
+  firstBaseUpdate: Update<State> | null;
+  lastBaseUpdate: Update<State> | null;
+  shared: SharedQueue<State>;
+  callbacks: Array<() => any> | null;
+};
+```
+
+> react-reconciler/src/ReactFiberHooks.ts
+
+```ts
+export type Update<S,A>={
+  lane: Lane.
+  revertLane: Lane,
+  action: A,
+  hasEagerState: boolean,
+  eagerState: S | null,
+  next: Update<S,A>
+}
+export type UpdateQueue<S,A>={
+  pending: Update<S,A> | null,
+  lanes: Lanes,
+  dispatch: (A=>mixed) | null,
+  lastRenderedReducer: ((S,A)=>S)|null,
+  lastRenderedState: S| null
+}
+```
+
+#### 事件優先級
+
+> react-reconciler/src/ReactEventPriorities.ts
+
+```ts
+import {
+  DefaultLane,
+  getHighestPriorityLane,
+  IdleLane,
+  includesNonIdleWork,
+  InputContinuousLane,
+  Lane,
+  Lanes,
+  NoLane,
+  SyncLane,
+} from "./ReactFiberLane";
+
+export type EventPriority = Lane;
+
+export const DiscreteEventPriority: EventPriority = SyncLane;
+export const ContinuousEventPriority: EventPriority = InputContinuousLane;
+export const DefaultEventPriority: EventPriority = DefaultLane;
+export const IdleEventPriority: EventPriority = IdleLane;
+let currentUpdatePriority: EventPriority = NoLane;
+
+export function getCurrentUpdatePriority(): EventPriority {
+  return currentUpdatePriority;
+}
+
+export function setCurrentUpdatePriority(newPriority: EventPriority) {
+  currentUpdatePriority = newPriority;
+}
+
+function isHigherEventPriority(a: EventPriority, b: EventPriority): boolean {
+  return a !== 0 && a < b;
+}
+
+// 根據 lanes 優先級最高的 lane 返回對應的 EventPriority。
+// 這裡會對應到 scheduler 包中的優先級
+export function lanesToEventPriority(lanes: Lanes): EventPriority {
+  const lane = getHighestPriorityLane(lanes);
+  if (!isHigherEventPriority(DiscreteEventPriority, lane)) {
+    return DiscreteEventPriority;
+  }
+  if (!isHigherEventPriority(ContinuousEventPriority, lane)) {
+    return ContinuousEventPriority;
+  }
+  if (includesNonIdleWork(lane)) {
+    return DefaultEventPriority;
+  }
+  return IdleEventPriority;
+}
+```
+
+#### 調度更新 scheduleUpdateOnFiber
+
+## transition
+
+- urgent updates: 緊急更新（普通更新），如點擊和輸入，這種更新一但延遲，用戶就會覺得怪怪的
+- transition updates: 過度更新（非緊急更新），如 ui 從一個視圖向另一個視圖更新。
+
+### useTransition: 某一個操作變成 transition
+
+- useTransition: 幫助你在不阻塞 ui 的情況下更新狀態的 hook
+- startTransition: 可以用在想更新的時候。
+
+  - 渲染慢：如果有很多沒那麼著急的內容要渲染
+  - 網路慢：如果更新的內容要花較多時間從服務端獲取。可以跟 Suspense 搭配。保證 ui 的連續性，可以短暫保留原本的畫面，延遲切換。
+    - 和 setTimeout 的不同？ startTransition 不會延遲調度（setTimeout 至少有 400ms 延後），接收的函式是同步執行，只是被加上延遲的標記，可以更早被 react 處理。
+
+  ```jsx
+  export default function TransitionPage(props) {
+    const [resource, setResource] = useState(inititalSource);
+    const [isePending, startTransition] = useTransition();
+
+    const refresh = () => {
+      startTransition(() => setResource(fetchData()));
+    };
+
+    return (
+      <div>
+        <Suspense fallback={"loading------"}>
+          <User resource={resource} /> // 一開始fetch會顯示"loading------"
+        </Suspense>
+        <button onClick={refresh}>{isPending ? "loading" : "refresh"}</button>
+        // 之後refresh User都會延遲畫面，完成後才改變
+      </div>
+    );
+  }
+  ```
+
+```ts
+const [isPending, startTranstion] = useTranstion();
+```
+
+### useDeferredValue: 相當於參數版本的 transitions
+
+```tsx
+function ListItem({ children }) {
+  let now = performance.now();
+  while (performance.now() - now < 3) {}
+  return <div>{children}</div>;
+}
+
+const SlowList = memo(function ({ text }) {
+  let items = [];
+  for (let i = 0; i < 80; i++) {
+    items.push(<ListItem>{text}</ListItem>);
+  }
+
+  return (
+    <div>
+      {text}
+      <ul>{items}</ul>
+    </div>
+  );
+});
+
+export default function UseDeferredValuePage() {
+  const [text, setText] = useState("hello");
+  const defferedText = useDeferredValue(text);
+  const handleChange = (e) => setText(e.target.value);
+
+  return (
+    <div>
+      <input value={text} onChange={handleChange} />
+      <p>{defferedText}</p>
+    </div>
+  );
+}
+```
+
+#### 模擬 useDeferredValue
+
+```ts
+let renderLanes: Lanes = NoLanes;
+
+// renderWithHook 應該會有參數 nextRenderLanes: Lanes，
+// renderLanes = nextRenderLanes; 紀錄當前的優先級
+// 只是當前沒有實現
+export function useDeferredValue<T>(value: T): T {
+  const hook = updateWorkInProgressHook();
+  const prevValue: T = hook.memorizedState;
+
+  if (currentHook !== null) {
+    // 更新階段
+    if (Object.is(value, prevValue)) {
+      // 傳入的值和當前渲染的值是相同的，因此可以快速的 bailout
+      return value;
+    } else {
+      // 收到一個與當前數據值不相同的新值
+      // 不只有包含非緊急更新
+      // renderLanes 還沒有實現，他應該要在 renderWithHooks 時傳入改變
+      const shouldDeferValue = !includesOnlyNonUrgentLanes(renderLanes);
+      if (shouldDeferValue) {
+        const defferredLane = requestDeferredLane();
+        currentlyRenderingFiber!.lanes = mergeLanes(
+          currentlyRenderingFiber!.lanes, //0
+          defferredLane // 128
+        );
+
+        // 復用之前的數值，不需要將其標記為一個 update，因為我們沒有渲染新值
+        return prevValue;
+      } else {
+        // 只包含非緊急更新，沒有其他緊急的更新了，這個時候執行這個非緊急更新就好
+        hook.memorizedState = value;
+        return value;
+      }
+    }
+  }
+  hook.memorizedState = value;
+  return value;
+}
+```
+
+> react-reconciler/src/ReactFiberConfigDOM.ts
+
+```ts
+import { getEventPriority } from "../../react-dom-bindings/src/events/ReactDOMEventListener";
+import { DefaultEventPriority, EventPriority } from "./ReactEventPriorities";
+
+export function getCurrentEventPriority(): EventPriority {
+  const currentEvent = window.event;
+  if (currentEvent === undefined) {
+    // 初次渲染
+    return DefaultEventPriority; // 32
+  }
+  return getEventPriority(currentEvent.type as any);
+}
+```
+
+> react-reconciler/src/ReactFiberWorkLoop.ts
+
+```ts
+// 獲取本次的update對應的優先級<
+// 應該會在 dipatchSetState 等地方被調用，這邊沒有實現
+export function requestUpdateLane(): Lane {
+  // 當前優先級，
+  const updateLane = getCurrentUpdatePriority();
+  if (updateLane !== NoLane) {
+    return updateLane;
+  }
+  // 初次渲染會走到這
+  const eventLane: Lane = getCurrentEventPriority();
+  return eventLane;
+}
+
+// 在 useDeferredValue 被調用
+export function requestDeferredLane(): Lane {
+  // 如果其他地方都沒有用到的話
+  if (workInProgressDeferredLane === NoLane) {
+    // 因為 TransitionLane 有很多條，循環遍歷 lanes 將每個新的 transition 分配到下一個 lane
+    // 在大多數情況下，這意味著每個 transition 都有自己的 lane，值到用完所有 lanes 並循環回到開頭
+    workInProgressDeferredLane = claimNextTransitionLane();
+  }
+
+  return workInProgressDeferredLane;
+}
+```
+
+> react-reconciler/src/ReactFiberLane.ts
+
+```ts
+// 有返回 Lane 或是 Lanes
+function getHighestPriorityLanes(lanes: Lanes | Lane): Lanes {
+  // 同步的 lanes 要優先被處理
+  const pendingSyncLanes = lanes & SyncUpdateLanes;
+  if (pendingSyncLanes !== 0) {
+    return pendingSyncLanes;
+  }
+
+  switch (getHighestPriorityLane(lanes)) {
+    case SyncLane:
+      return SyncLane;
+    case InputContinuousHydrationLane:
+      return InputContinuousHydrationLane;
+    case InputContinuousLane:
+      return InputContinuousLane;
+    case DefaultHydrationLane:
+      return DefaultHydrationLane;
+    case DefaultLane:
+      return DefaultLane;
+    case TransitionHydrationLane:
+      return TransitionHydrationLane;
+    case TransitionLane1:
+    case TransitionLane2:
+    case TransitionLane3:
+    case TransitionLane4:
+    case TransitionLane5:
+    case TransitionLane6:
+    case TransitionLane7:
+    case TransitionLane8:
+    case TransitionLane9:
+    case TransitionLane10:
+    case TransitionLane11:
+    case TransitionLane12:
+    case TransitionLane13:
+    case TransitionLane14:
+    case TransitionLane15:
+    case TransitionLane16:
+      return lanes & TransitionLanes;
+    case RetryLane1:
+    case RetryLane2:
+    case RetryLane3:
+    case RetryLane4:
+    case RetryLane5:
+      return lanes & RetryLanes;
+    case SelectiveHydrationLane:
+      return SelectiveHydrationLane;
+    case IdleHydrationLane:
+      return IdleHydrationLane;
+    case IdleLane:
+      return IdleLane;
+    case OffscreenLane:
+      return OffscreenLane;
+    default:
+      // 基本不會走到這裡
+      return lanes;
+  }
+}
+```

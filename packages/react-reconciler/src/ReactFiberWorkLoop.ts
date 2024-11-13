@@ -1,4 +1,5 @@
 import {
+  getCurrentPriorityLevel,
   NormalPriority,
   scheduleCallback,
 } from "@mono/scheduler/src/Scheduler";
@@ -11,6 +12,9 @@ import {
 import { completeWork } from "./ReactFiberCompleteWork";
 import { ensureRootIsScheduled } from "./ReactFiberRootScheduler";
 import type { Fiber, FiberRoot } from "./ReactInternalTypes";
+import { claimNextTransitionLane, Lane, NoLane } from "./ReactFiberLane";
+import { getCurrentUpdatePriority } from "./ReactEventPriorities";
+import { getCurrentEventPriority } from "./ReactFiberConfigDOM";
 
 type ExecutionContext = number;
 
@@ -24,6 +28,7 @@ let executionContext: ExecutionContext = NoContext;
 // 創建指針，指向正在處理的節點
 let workInProgress: Fiber | null = null;
 let workInProgressRoot: FiberRoot | null = null;
+let workInProgressDeferredLane: Lane = NoLane;
 
 // 頁面初次渲染、類組件 setState/forceUpdate、函數組件 setState 都會走到此
 export function scheduleUpdateOnFiber(root: FiberRoot, fiber: Fiber) {
@@ -159,4 +164,29 @@ function completeUnitWork(unitOfWork: Fiber) {
     completedWork = returnFiber;
     workInProgress = completedWork;
   } while (completedWork !== null);
+}
+
+// 獲取本次的update對應的優先級<
+// 應該會在 dipatchSetState 等地方被調用，這邊沒有實現
+export function requestUpdateLane(): Lane {
+  // 當前優先級，
+  const updateLane = getCurrentUpdatePriority();
+  if (updateLane !== NoLane) {
+    return updateLane;
+  }
+  // 初次渲染會走到這
+  const eventLane: Lane = getCurrentEventPriority();
+  return eventLane;
+}
+
+// 在 useDeferredValue 被調用
+export function requestDeferredLane(): Lane {
+  // 如果其他地方都沒有用到的話
+  if (workInProgressDeferredLane === NoLane) {
+    // 因為 TransitionLane 有很多條，循環遍歷 lanes 將每個新的 transition 分配到下一個 lane
+    // 在大多數情況下，這意味著每個 transition 都有自己的 lane，值到用完所有 lanes 並循環回到開頭
+    workInProgressDeferredLane = claimNextTransitionLane();
+  }
+
+  return workInProgressDeferredLane;
 }
