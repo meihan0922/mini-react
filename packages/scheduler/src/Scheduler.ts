@@ -28,41 +28,50 @@ export type Task = {
   priorityLevel: PriorityLevel;
   // 任務是什麼時候進來調度器的，時間切片的起始時間
   startTime: number;
-  // 過期時間
+  // 過期時間: 起始時間加上 按照任務優先級計算的 delay 時間
   expirationTime: number;
   sortIndex: number;
 };
 
 /**
  * 三把鎖 - 避免重複調度
- * 如果任務一直進來，瘋狂跑 requestHostCallback -> schedulePerformWorkUntilDeadline，
+ * 簡單來說 scheduler 有兩個循環迴圈，
+ * 第一個是 和瀏覽器申請非同步(MessageChannel)的回調，他會在任務堆沒有完全清空之前持續申請時間切片
+ * 第二個是 workLoop，在時間切片內，處理任務堆
+ *
+ * 如果任務一直進來，不能瘋狂申請時間切片 requestHostCallback -> schedulePerformWorkUntilDeadline，
  * 才需要鎖，只有 task queue 被清空了（也就是目前所有的任務有被執行完），scheduler 才會重新發起一次調度請求。
- * - `isHostCallbackScheduled`： 正在等待 callback 被回調；(scheduleCallback 被設成 true，flushwork 被設成 false)
- * - `isPerformingWork`： callback 被回調了，正在運行 work loop；(flushwork 開始被設成 true，結束 false)
- * - `isMessageLoopRunning`： 無數個 work loop 之後，task queue 終於被清空。(requestHostCallback 發起調度時間切片 schedulePerformWorkUntilDeadline 前，被設成 true。performWorkUntilDeadline 中，task queue 被清空，所有任務都執行完之後被設定為 false)
+ * - `isHostCallbackScheduled`： 主線程是否在忙第一個循環調度呢？目的是確定第一個循環調度開始；(scheduleCallback 被設成 true，flushwork 被設成 false)
+ * - `isPerformingWork`： 第二個循環調度在進行嗎，目的是紀錄時間切片內，正在運行的 work loop；(flushwork 開始被設成 true，結束 false)
+ * - `isMessageLoopRunning`： 紀錄的是第一個循環調度是否結束，無數個 申請時間切片和workLoop 之後，task queue 終於被清空。
+ * (requestHostCallback 發起調度時間切片 schedulePerformWorkUntilDeadline 前，被設成 true。performWorkUntilDeadline 中，task queue 被清空，所有任務都執行完之後被設定為 false)
  */
 
-// ! 是否有任務正在執行
-let isPerformingWork = false;
-//! 主線程是否正在調度中
+/** 建立三把鎖 */
+/** 1. 紀錄 主線程處理時間切片調度確定已經開始 */
 let isHostCallbackScheduled = false;
-// ! 宏任務不能重複創建
+/** 2. 紀錄 時間切片調度確定已經完整結束 */
 let isMessageLoopRunning = false;
+/** 3. 紀錄 workLoop 循環調度是否結束 */
+let isPerformingWork = false;
 
-// ! 延遲任務的計時器
-let taskTimeoutId = -1;
-// ! 主線程是否正在倒計時調度中
+/** 任務相關變數 */
+/** 任務 id 累加紀錄 */
+let taskIdCounter = 1;
+/** 任務池，最小堆 **/
+const taskQueue: Array<Task> = [];
+/** 指向當前正在執行的 **/
+let currentTask: Task | null = null;
+/** 紀錄當前處理的任務優先級，供之後判斷是否優先執行 */
+let currentPriorityLevel: PriorityLevel = NoPriority;
+// 主線程是否正在倒計時調度中
 let isHostTimeoutScheduled = false;
 
-let taskIdCounter = 1;
-
-// * 任務池，最小堆
-const taskQueue: Array<Task> = [];
-// * 當前任務池
-let currentTask: Task | null = null;
+/** 延遲相關 */
 // * 延遲任務池
 const timerQueue: Array<Task> = [];
-let currentPriorityLevel: PriorityLevel = NoPriority;
+// 延遲任務的計時器
+let taskTimeoutId = -1;
 
 /**
  * * 任務調度器的入口，某任務進入調度器，等待調度
@@ -213,6 +222,11 @@ function schedulePerformWorkUntilDeadline() {
   port2.postMessage(null);
 }
 
+// 時間切片的起始，時間戳
+let startTime = -1;
+// 時間切片，這是個時間段
+let frameInterval = 5;
+
 function performWorkUntilDeadline() {
   if (isMessageLoopRunning) {
     const currentTime = getCurrentTime();
@@ -262,11 +276,6 @@ function cancelCallback() {
 function getCurrentPriorityLevel(): PriorityLevel {
   return currentTask?.priorityLevel ?? currentPriorityLevel;
 }
-
-// 時間切片的起始，時間戳
-let startTime = -1;
-// 時間切片，這是個時間段
-let frameInterval = 5;
 
 /**
  * * 是否要終止執行，把控制權交還給主線程

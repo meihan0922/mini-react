@@ -1,25 +1,109 @@
-# 造輪子步驟
+# scheduler 造輪子
 
-1. 建立變數
+## scheduler 是做什麼的？
 
-   1. 有兩個任務池，一個是當前正在執行的 - `currentTask`，一個是排隊中的（最小堆）- `taskQueue`。
-   2. `currentPriorityLevel` - 紀錄當前處理的任務優先級，供之後判斷是否優先執行
-   3. `isHostCallbackScheduled` - 主線程是否正在調度中
-   4. `isPerformingWork` - 是否有任務正在執行
-   5. `isMessageLoopRunning` - 是否已經申請過時間切片
+在 README.md 當中可以看到
 
-2. `scheduleCallback`
-   1. 當有新的任務時，會按照優先等級，封裝成 Task 物件，推入最小堆，
-   2. 看主線程是否還在忙調度 `isHostCallbackScheduled`?
+> This is a package for cooperative scheduling in a browser environment. It is currently used internally by React, but we plan to make it more generic.
+
+> 在瀏覽器環境去實作協作式的調度(cooperative scheduling)
+
+### 什麼是協作式調度?
+
+這個概念主要是來自於作業系統，由於 CPU 資源極為寶貴，為了提高它的使用率，作業系統需要把 CPU 的使用權在同一時間段內分配給多個進程或任務去使用。多進程或任務對 CPU 的使用權的策略，稱為「調度策略」。協作式是其中一種。
+
+#### 協作式調度
+
+- 任務或進程**自願釋放 CPU 控制權**。這意味著任務具有一定的**合作性和自覺性**，只有在**主動讓出** CPU 的情況下，其他任務才能獲得執行機會；
+- 由於任務必須自行管理 CPU 時間，協作式調度通常不夠穩定，容易出現問題，例如任務之間的競爭和餓死。
+
+#### 搶佔式調度
+
+- **作業系統身為審判官，具有管理任務執行的權限，可隨時中斷正在執行的任務，並將 CPU 指派給其他任務。**
+- 通常會使用**優先權、時間切片**等策略來決定任務執行的順序，高優先權任務會優先執行，而時間切片用於控制任務在 CPU 上執行的時間；
+- 可以更好地保證系統的回應性和穩定性，因為它不依賴任務的合作性，如果某個任務陷入無限循環或其他問題，作業系統仍然可以確保其他任務能夠獲得執行機會；
+
+#### 轉換到瀏覽器
+
+CPU 的角色變成主執行緒（UI 執行緒）的控制權。scheduler 套件核心要實現的就是「讓 js 執行一段時間後，**主動**把主執行緒的控制權讓給瀏覽器」。
+
+- 如何把主動地把控制權讓出去呢？
+  - setImmediate()
+  - MessageChannel
+  - setTimeout()
+- 執行一段時間？到底執行多久呢？
+
+##### 控制權的轉讓
+
+react 按照使用者的瀏覽器支援度，選擇使用其中一種非同步 api 來實現，將執行任務放入宏任務中
+
+- setImmediate()
+- MessageChannel
+- setTimeout()
+
+###### 為什麼不是微任務？
+
+微任務會緊接著在另一個微任務中執行，如果其中執行完後又呼叫微任務，event loop 的 call stack 一直被佔用。宏任務才可以實現控制權的轉讓。
+
+###### React 為什麼選擇使用 MessageChannel 來實現類似 requestIdleCallback 的功能，主要是因為以下幾個原因：
+
+1. <u>兼容性和一致性</u>：
+   requestIdleCallback 在所有瀏覽器中的支持情況不一樣，特別是在一些舊版瀏覽器或不支持這個 API 的環境下，React 希望能在不同的環境中保持一致的行為。使用 MessageChannel 可以提供更一致的跨瀏覽器行為。
+
+2. <u>精細控制和穩定性</u>：
+   **呼叫的間隔不穩定，因特定的裝置效能和目前的瀏覽器任務而異，呼叫的頻率太低了，據說有網友檢查到只有 20 次/每秒**。MessageChannel 和 postMessage 使得 React 可以更精確地控制執行時機，並且在任務調度中提供更高的穩定性。
+
+3. <u>更高的控制權</u>：
+   使用 MessageChannel 使得 React 團隊可以完全掌控任務的調度過程。他們可以自行決定如何處理閒置時間，而不需要依賴瀏覽器的實現。這有助於 React 更好地優化性能和用戶體驗。
+
+4. <u>測試和調試</u>：
+   自己實現的調度機制可以讓 React 團隊更容易進行測試和調試，特別是在測試不同的瀏覽器和環境下的行為時。
+
+###### 為什麼不能用 setTimeout 來代替 MessageChannel？不是都是呼叫執行宏任務嗎？
+
+- MessageChannel 的執行時機會早於 setTimeout
+- setTimeout(fn,0) 所建立的宏任務，會有至少 4ms 的執行時差
+- 如果目前環境不支援 MessageChannel 時，會預設使用 setTimeout
+
+###### performWorkUntilDeadline()
+
+瀏覽器和 js 程式交替佔用主執行緒的控制權的這種現象就稱之為「time slicing」。
+
+在源碼當中，會用非同步執行 performWorkUntilDeadline，裡面又會去呼叫 `workLoop`，裡面會 while 執行，直到約定時間（時間切片）到點為止 (在`shouldYieldToHost()`中)，之後就會讓給瀏覽器去執行 layout, paint, composite。
+
+在源碼中可以看到 `shouldYieldToHost()` 裡面的時間切片是 `const frameYieldMs = 5; // 5ms`，
+react 團隊根據自己的實踐所獲得的經驗，覺得了預留 11ms 給瀏覽器所取得的介面更新效果比較理想。所以，留給 js 解釋執行的時間就是 16ms - 11ms = 5ms。
+
+> ps. 源碼是使用 performance.now()來計算時間，是因為能表示的時間精度更高，相比於 Date.now()只能精確到 1ms，performance.now()能精確到微秒級別。Date.now()會受到作業系統時鐘或使用者時間調整的影響。
+
+## 造輪子步驟
+
+1. 建立任務型別
+2. 建立變數
+
+   - 任務相關變數
+     1. `currentPriorityLevel` - 紀錄當前處理的任務優先級，供之後判斷是否優先執行
+     2. `currentTask`: 指向當前正在執行的
+     3. `taskQueue`: 任務池（最小堆）
+     4. `taskIdCounter`: 任務 id 累加紀錄
+   - 三把鎖
+     1. `isHostCallbackScheduled` - 主線程處理時間切片調度確定已經開始，主線程是否還在忙調度
+     2. `isPerformingWork` - 紀錄 workLoop 循環調度是否結束
+     3. `isMessageLoopRunning` - 時間切片調度確定已經完整結束
+
+3. `scheduleCallback`
+   1. 紀錄當前時間
+   2. 會按照優先等級＋當前時間變成 排序的依據，封裝成 Task 物件，推入最小堆，
+   3. 看主線程是否還在忙調度 `isHostCallbackScheduled`?
       1. 沒有，啟動主線程，開始調度 `requestHostCallback`。
       2. `isHostCallbackScheduled`設定為`true`
-3. `requestHostCallback`
-   1. 詢問時間切片部門是否在忙`isMessageLoopRunning`？
+4. `requestHostCallback`
+   1. 詢問時間切片循環是否在進行`isMessageLoopRunning`？
       1. 沒有
          1. 通知申請時間切片的部門，請幫忙申請宏任務 `schedulePerformWorkUntilDeadline`
          2. `isMessageLoopRunning`設定為`true`
-4. `schedulePerformWorkUntilDeadline` 透過 `MessageChannel()` 申請宏任務執行`performWorkUntilDeadline`
-5. `performWorkUntilDeadline`
+5. `schedulePerformWorkUntilDeadline` 透過 `MessageChannel()` 申請宏任務執行`performWorkUntilDeadline`
+6. `performWorkUntilDeadline`
    1. 去執行任務池最小堆`flushWork`，
       1. 主線程是否還在忙調度`isHostCallbackScheduled`設定為`false`
       2. 紀錄當前的任務優先級，供任務循環後使用
@@ -41,28 +125,37 @@
    2. 之後看`workLoop`回傳的當前任務池執行還有剩餘的任務嗎？
       1. 有: 就回到 2.`schedulePerformWorkUntilDeadline` 申請下一個時間切片。
       2. 沒有: 把時間切片部門設定為閒置：`isMessageLoopRunning  = false`
-6. 建立取消正在執行的任務堆的某任務函式 & export
-7. 建立取得當前正在執行的任務的優先等級函式 & export
-8. 是否要終止任務，把控制權交給主線程函式 & export
+7. 建立取消正在執行的任務堆的某任務函式 & export
+8. 建立取得當前正在執行的任務的優先等級函式 & export
+9. 是否要終止任務，把控制權交給主線程函式 & export
 
-### 三把鎖 - 避免重複調度
+## 三把鎖的意義 - 避免重複調度
 
-如果任務一直進來，瘋狂跑 requestHostCallback -> schedulePerformWorkUntilDeadline，才會需要三把鎖`isHostCallbackScheduled` `isPerformingWork` `isMessageLoopRunning`，只有 task queue 被清空了（也就是目前所有的任務有被執行完），scheduler 才會重新發起一次調度請求。
+簡單來說 scheduler 有兩個循環迴圈，
+第一個是 和瀏覽器申請非同步(MessageChannel)的回調，他會在任務堆沒有完全清空之前持續申請時間切片
+第二個是 workLoop，在時間切片內，處理任務堆
 
-- `isHostCallbackScheduled`： 正在等待 callback 被回調；(scheduleCallback 被設成 true，flushwork 被設成 false)
-- `isPerformingWork`： callback 被回調了，正在運行 work loop；(flushwork 開始被設成 true，結束 false)
-- `isMessageLoopRunning`： 無數個 work loop 之後，task queue 終於被清空。(requestHostCallback 發起調度時間切片 schedulePerformWorkUntilDeadline 前，被設成 true。performWorkUntilDeadline 中，task queue 被清空，所有任務都執行完之後被設定為 false)
+- 如果任務一直進來，不能瘋狂申請時間切片 requestHostCallback -> schedulePerformWorkUntilDeadline，
+  才需要鎖，只有 task queue 被清空了、三個鎖頭都被設定成 false（也就是目前所有的任務有被執行完），scheduler 才會重新發起一次調度請求。
 
-### 造任務池，當前任務優先級
+* `isHostCallbackScheduled`： 主線程是否在忙第一個循環調度呢？目的是確定第一個循環調度開始；(scheduleCallback 被設成 true，flushwork 被設成 false)
+* `isPerformingWork`： 第二個循環調度在進行嗎，目的是紀錄時間切片內，正在運行的 work loop；(flushwork 開始被設成 true，結束 false)
+* `isMessageLoopRunning`： 紀錄時間切片調度確定已經完整結束，無數個 申請時間切片和 workLoop 之後，task queue 終於被清空。
+  (requestHostCallback 發起調度時間切片 schedulePerformWorkUntilDeadline 前，被設成 true。performWorkUntilDeadline 中，task queue 被清空，所有任務都執行完之後被設定為 false)
+
+## 1. 建立任務型別
 
 ```ts
-// arg: 是否時間切片到了，過期了嗎？
+// 任務要執行的回調，有可能會再次回傳函式，就會再加入任務堆
+// arg: 過期了嗎？
 type Callback = (arg: boolean) => Callback | null | boolean;
 // 任務進入 scheduler 後被封裝成 Task
 export type Task = {
+  // 對應 taskIdCounter
   id: number;
   // 任務的初始值，意思是時間到了要執行的任務
   callback: Callback | null;
+  // 任務優先級
   priorityLevel: PriorityLevel;
   // 任務是什麼時候進來調度器的，時間切片的起始時間
   startTime: number;
@@ -70,35 +163,28 @@ export type Task = {
   expirationTime: number;
   sortIndex: number;
 };
-/**
- * ! 鎖頭，紀錄是否有work正在執行，避免重複調度
- */
-let isPerformingWork = false;
-/**
- * ! 主線程是否正在調度中
- */
-let isHostCallbackScheduled = false;
-/**
- * ! 延遲任務的計時器
- */
-let taskTimeoutId = -1;
-/**
- * ! 主線程是否正在倒計時調度中
- */
-let isHostTimeoutScheduled = false;
-/**
- * ! 宏任務不能重複創建
- */
-let isMessageLoopRunning = false;
-let taskIdCounter = 1;
+```
 
-// * 任務池，最小堆
+## 2. 建立變數
+
+```ts
+/** 任務相關變數 */
+/** 任務 id 累加紀錄 */
+let taskIdCounter = 1;
+/** 任務池，最小堆 **/
 const taskQueue: Array<Task> = [];
-// * 當前任務池
+/** 指向當前正在執行的 **/
 let currentTask: Task | null = null;
-// * 延遲任務池
-const timerQueue: Array<Task> = [];
+/** 紀錄當前處理的任務優先級，供之後判斷是否優先執行 */
 let currentPriorityLevel: PriorityLevel = NoPriority;
+
+/** 建立三把鎖 */
+/** 1. 紀錄 主線程處理時間切片調度確定已經開始 */
+let isHostCallbackScheduled = false;
+/** 2. 紀錄 時間切片調度確定已經完整結束 */
+let isMessageLoopRunning = false;
+/** 3. 紀錄 workLoop 循環調度是否結束 */
+let isPerformingWork = false;
 ```
 
 ### `scheduleCallback`
@@ -147,9 +233,9 @@ function scheduleCallback(priorityLevel: PriorityLevel, callback: Callback) {
     callback,
     startTime,
     expirationTime,
-    sortIndex: -1,
+    sortIndex: expirationTime,
   };
-  newTask.sortIndex = expirationTime;
+
   push(taskQueue, newTask);
 
   // ! 主線程沒有在忙，而且也沒有時間切片在執行
@@ -165,8 +251,8 @@ function scheduleCallback(priorityLevel: PriorityLevel, callback: Callback) {
 
 啟動主線程，開始調度
 
-1.  詢問時間切片部門是否在忙`isMessageLoopRunning`？
-    1. 沒有，通知申請時間切片的部門，請幫忙申請宏任務 `schedulePerformWorkUntilDeadline`
+1.  詢問時間切片循環是否在進行`isMessageLoopRunning`？
+    1. 沒有，申請時間切片，申請宏任務 `schedulePerformWorkUntilDeadline`
     2. `isMessageLoopRunning`設定為`true`
 
 ```ts
@@ -198,8 +284,9 @@ function schedulePerformWorkUntilDeadline() {
 
 ### performWorkUntilDeadline
 
-1. 去執行任務池最小堆`flushWork`，
-   1. 主線程是否還在忙調度`isHostCallbackScheduled`設定為`false`
+1. 確定正在時間切片的循環當中`isMessageLoopRunning`
+2. 去執行任務池最小堆`flushWork`，
+   1. 主線程處理時間切片調度確定已經開始，主線程是否還在忙調度`isHostCallbackScheduled`設定為`false`
    2. 紀錄當前處理的任務優先級
    3. 是否在執行任務中`isPerformingWork`設定為`true`
    4. 調用工作循環`workLoop`會回傳 最小堆任務池還有剩餘的任務嗎？
@@ -217,7 +304,7 @@ function schedulePerformWorkUntilDeadline() {
    7. 之後看`workLoop`回傳的當前任務池執行還有剩餘的任務嗎？
       1. 有: 就回到 2.`schedulePerformWorkUntilDeadline` 申請下一個時間切片。
       2. 沒有: 把時間切片部門設定為閒置：`isMessageLoopRunning  = false`
-2. 之後看`workLoop`回傳的當前任務池執行還有剩餘的任務嗎？
+3. 之後看`workLoop`回傳的當前任務池執行還有剩餘的任務嗎？
    1. 有: 就回到 2.`schedulePerformWorkUntilDeadline` 申請下一個時間切片。
    2. 沒有: 把時間切片部門設定為閒置：`isMessageLoopRunning  = false`
 
