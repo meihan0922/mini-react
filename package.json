@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "pnpm --filter examples dev",
+    "dev-debugger": "pnpm --filter react-debugger dev",
     "test": "vitest"
   },
   "keywords": [],
