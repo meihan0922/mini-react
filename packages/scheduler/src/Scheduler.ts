@@ -66,6 +66,10 @@ let currentTask: Task | null = null;
 let currentPriorityLevel: PriorityLevel = NoPriority;
 // 主線程是否正在倒計時調度中
 let isHostTimeoutScheduled = false;
+// 時間切片的起始，時間戳
+let startTime = -1;
+// 時間切片，這是個時間段
+let frameInterval = frameYieldMs; //5
 
 /** 延遲相關 */
 // * 延遲任務池
@@ -103,17 +107,15 @@ function scheduleCallback(
     case UserBlockingPriority:
       timeout = userBlockingPriorityTimeout;
       break;
-    case NormalPriority:
-      timeout = normalPriorityTimeout;
-      break;
     case LowPriority:
       timeout = lowPriorityTimeout;
       break;
     case IdlePriority:
       timeout = maxSigned31BitInt;
+      break;
     case NormalPriority:
     default:
-      timeout = frameYieldMs;
+      timeout = normalPriorityTimeout;
       break;
   }
   const expirationTime = startTime + timeout;
@@ -140,6 +142,7 @@ function scheduleCallback(
       } else {
         isHostTimeoutScheduled = true;
       }
+      // 啟動計時器！同時間的計時器只會有一個
       requestHostTimeout(handleTimeout, startTime - currentTime);
     }
   } else {
@@ -149,11 +152,12 @@ function scheduleCallback(
     // 時間切片內正在執行中！
     if (!isHostCallbackScheduled && !isPerformingWork) {
       isHostCallbackScheduled = true;
+      // 調度主要的任務堆
       requestHostCallback();
     }
   }
 }
-
+// 處理延時堆
 function advanceTimers(currentTime: number) {
   let timer = peek(timerQueue);
   while (timer !== null) {
@@ -173,16 +177,23 @@ function advanceTimers(currentTime: number) {
 }
 
 function handleTimeout(currentTime: number) {
+  // 主線程是否在進行計時器調度
   isHostTimeoutScheduled = false;
+  // 如果 timerQueue中 "有效"任務到達執行時間，就放到 taskQueue 中
   advanceTimers(currentTime);
 
+  // 主線程是否在調度中
   if (!isHostCallbackScheduled) {
+    // 主任務堆不為空
     if (peek(taskQueue) !== null) {
       isHostCallbackScheduled = true;
+      // 調度主要的任務堆
       requestHostCallback();
     } else {
+      // 處理延時任務堆
       const firstTimer = peek(timerQueue);
       if (firstTimer !== null) {
+        // 啟動計時器
         requestHostTimeout(handleTimeout, firstTimer.startTime - currentTime);
       }
     }
@@ -221,11 +232,6 @@ channel.port1.onmessage = performWorkUntilDeadline;
 function schedulePerformWorkUntilDeadline() {
   port2.postMessage(null);
 }
-
-// 時間切片的起始，時間戳
-let startTime = -1;
-// 時間切片，這是個時間段
-let frameInterval = 5;
 
 function performWorkUntilDeadline() {
   if (isMessageLoopRunning) {
@@ -297,7 +303,10 @@ function shouldYieldToHost() {
  * @returns boolean 是否還有任務沒有執行完畢，還要繼續執行
  */
 function workLoop(initialTime: number): boolean {
+  // 主線程是否在進行計時器調度
   let currentTime = initialTime;
+  // 進入整個延遲任務堆處理
+  // 如果 timerQueue中 "有效"任務到達執行時間，就放到 taskQueue 中
   advanceTimers(currentTime);
   // 取出優先級最高的任務
   currentTask = peek(taskQueue);

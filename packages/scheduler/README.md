@@ -1,4 +1,54 @@
+- [scheduler 造輪子](#scheduler-造輪子)
+  - [scheduler 是做什麼的？](#scheduler-是做什麼的)
+    - [什麼是協作式調度?](#什麼是協作式調度)
+      - [協作式調度](#協作式調度)
+      - [搶佔式調度](#搶佔式調度)
+      - [轉換到瀏覽器](#轉換到瀏覽器)
+    - [控制權的轉讓](#控制權的轉讓)
+      - [為什麼不是微任務？](#為什麼不是微任務)
+      - [React 為什麼選擇使用 MessageChannel 來實現類似 requestIdleCallback 的功能，主要是因為以下幾個原因：](#react-為什麼選擇使用-messagechannel-來實現類似-requestidlecallback-的功能主要是因為以下幾個原因)
+        - [為什麼不能用 setTimeout 來代替 MessageChannel？不是都是呼叫執行宏任務嗎？](#為什麼不能用-settimeout-來代替-messagechannel不是都是呼叫執行宏任務嗎)
+    - [如何避免餓死現象?](#如何避免餓死現象)
+      - [time slicing](#time-slicing)
+      - [aging](#aging)
+  - [造輪子步驟](#造輪子步驟)
+    - [三把鎖的意義 - 避免重複調度](#三把鎖的意義---避免重複調度)
+    - [1. 建立任務型別](#1-建立任務型別)
+    - [2. 建立變數](#2-建立變數)
+    - [scheduleCallback](#schedulecallback)
+    - [requestHostCallback](#requesthostcallback)
+    - [schedulePerformWorkUntilDeadline](#scheduleperformworkuntildeadline)
+    - [performWorkUntilDeadline](#performworkuntildeadline)
+    - [建立取消正在執行的任務堆的某任務函式 \& export](#建立取消正在執行的任務堆的某任務函式--export)
+    - [建立取得當前正在執行的任務的優先等級函式 \& export](#建立取得當前正在執行的任務的優先等級函式--export)
+    - [是否要終止任務，把控制權交給主線程函式 \& export](#是否要終止任務把控制權交給主線程函式--export)
+  - [調度延遲任務](#調度延遲任務)
+    - [延時任務轉普通任務的時機?](#延時任務轉普通任務的時機)
+    - [`scheduleCallback` 加入延遲任務參數](#schedulecallback-加入延遲任務參數)
+    - [建立計時器](#建立計時器)
+    - [handleTimeout 時間到的 callback，調用 advanceTimers](#handletimeout-時間到的-callback調用-advancetimers)
+  - [實現真正的 time slicing](#實現真正的-time-slicing)
+  - [學習資料](#學習資料)
+
 # scheduler 造輪子
+
+```mermaid
+graph LR
+    A[任務調度] --> B[與外界的關聯: unstable_scheduleCallback];
+    B --> C[1. 創建任務];
+    B --> D[2. 把任務放入任務池];
+    D --> E[1. 立即要執行的放入 taskQueue];
+    D --> F[2. 延遲執行的放入 timerQueue];
+    B --> G[1. 初始化任務池];
+    B --> H[2. 任務調度];
+    H --> I[調度方式];
+    H --> J[算法：最小堆];
+    J --> K[peek];
+    J --> L[push];
+    J --> M[pop];
+    L --> N[添加到尾部，向上調整 siftUp];
+    M --> O[覆蓋頭部元素，向下調整 siftDown];
+```
 
 ## scheduler 是做什麼的？
 
@@ -6,7 +56,7 @@
 
 > This is a package for cooperative scheduling in a browser environment. It is currently used internally by React, but we plan to make it more generic.
 
-> 在瀏覽器環境去實作協作式的調度(cooperative scheduling)
+> 在瀏覽器環境去實作協作式的調度(cooperative scheduling)（但其實也有使用到搶佔式調度的策略）（可以看到不只是可以運用在 react 上）
 
 ### 什麼是協作式調度?
 
@@ -16,12 +66,14 @@
 
 - 任務或進程**自願釋放 CPU 控制權**。這意味著任務具有一定的**合作性和自覺性**，只有在**主動讓出** CPU 的情況下，其他任務才能獲得執行機會；
 - 由於任務必須自行管理 CPU 時間，協作式調度通常不夠穩定，容易出現問題，例如任務之間的競爭和餓死。
+- 在處理 IO 操作、事件處理等場景下非常有用，可以避免阻塞瀏覽器主線程，提升用戶體驗。
 
 #### 搶佔式調度
 
 - **作業系統身為審判官，具有管理任務執行的權限，可隨時中斷正在執行的任務，並將 CPU 指派給其他任務。**
 - 通常會使用**優先權、時間切片**等策略來決定任務執行的順序，高優先權任務會優先執行，而時間切片用於控制任務在 CPU 上執行的時間；
 - 可以更好地保證系統的回應性和穩定性，因為它不依賴任務的合作性，如果某個任務陷入無限循環或其他問題，作業系統仍然可以確保其他任務能夠獲得執行機會；
+- 但是相對容易出現餓死現象，對於餓死現象，常見的解決方法是定期檢查，對於優先級低的任務，提高他的優先級，react 也是採用這個方案。
 
 #### 轉換到瀏覽器
 
@@ -33,7 +85,7 @@ CPU 的角色變成主執行緒（UI 執行緒）的控制權。scheduler 套件
   - setTimeout()
 - 執行一段時間？到底執行多久呢？
 
-##### 控制權的轉讓
+### 控制權的轉讓
 
 react 按照使用者的瀏覽器支援度，選擇使用其中一種非同步 api 來實現，將執行任務放入宏任務中
 
@@ -41,11 +93,11 @@ react 按照使用者的瀏覽器支援度，選擇使用其中一種非同步 a
 - MessageChannel
 - setTimeout()
 
-###### 為什麼不是微任務？
+#### 為什麼不是微任務？
 
 微任務會緊接著在另一個微任務中執行，如果其中執行完後又呼叫微任務，event loop 的 call stack 一直被佔用。宏任務才可以實現控制權的轉讓。
 
-###### React 為什麼選擇使用 MessageChannel 來實現類似 requestIdleCallback 的功能，主要是因為以下幾個原因：
+#### React 為什麼選擇使用 MessageChannel 來實現類似 requestIdleCallback 的功能，主要是因為以下幾個原因：
 
 1. <u>兼容性和一致性</u>：
    requestIdleCallback 在所有瀏覽器中的支持情況不一樣，特別是在一些舊版瀏覽器或不支持這個 API 的環境下，React 希望能在不同的環境中保持一致的行為。使用 MessageChannel 可以提供更一致的跨瀏覽器行為。
@@ -59,22 +111,28 @@ react 按照使用者的瀏覽器支援度，選擇使用其中一種非同步 a
 4. <u>測試和調試</u>：
    自己實現的調度機制可以讓 React 團隊更容易進行測試和調試，特別是在測試不同的瀏覽器和環境下的行為時。
 
-###### 為什麼不能用 setTimeout 來代替 MessageChannel？不是都是呼叫執行宏任務嗎？
+##### 為什麼不能用 setTimeout 來代替 MessageChannel？不是都是呼叫執行宏任務嗎？
 
 - MessageChannel 的執行時機會早於 setTimeout
 - setTimeout(fn,0) 所建立的宏任務，會有至少 4ms 的執行時差
 - 如果目前環境不支援 MessageChannel 時，會預設使用 setTimeout
 
-###### performWorkUntilDeadline()
+### 如何避免餓死現象?
+
+#### time slicing
 
 瀏覽器和 js 程式交替佔用主執行緒的控制權的這種現象就稱之為「time slicing」。
-
-在源碼當中，會用非同步執行 performWorkUntilDeadline，裡面又會去呼叫 `workLoop`，裡面會 while 執行，直到約定時間（時間切片）到點為止 (在`shouldYieldToHost()`中)，之後就會讓給瀏覽器去執行 layout, paint, composite。
+避免某個任務一直佔著主線程。
+在源碼當中，會用非同步執行 `performWorkUntilDeadline` ，裡面又會去呼叫 `workLoop`，裡面會 while 執行，直到約定時間（時間切片）到點為止 (在`shouldYieldToHost()`中)，之後就會讓給瀏覽器去執行 layout, paint, composite。
 
 在源碼中可以看到 `shouldYieldToHost()` 裡面的時間切片是 `const frameYieldMs = 5; // 5ms`，
 react 團隊根據自己的實踐所獲得的經驗，覺得了預留 11ms 給瀏覽器所取得的介面更新效果比較理想。所以，留給 js 解釋執行的時間就是 16ms - 11ms = 5ms。
 
 > ps. 源碼是使用 performance.now()來計算時間，是因為能表示的時間精度更高，相比於 Date.now()只能精確到 1ms，performance.now()能精確到微秒級別。Date.now()會受到作業系統時鐘或使用者時間調整的影響。
+
+#### aging
+
+> react-reconciler 中 ReactFiberLane.js 有一個函式 `markStarvedLanesAsExpired`，就是把餓死的任務標記為過期，相當於提高優先級，`root.expiredLanes |= lane`（把這個車道的任務標記為過期），強制完成。會在 `scheduleTaskForRootDuringMicroTask` 執行微任務函式內部調用或是在交換控制權給主線程之前，在渲染任務的結尾調用。他不能同步被調用。
 
 ## 造輪子步驟
 
@@ -82,7 +140,7 @@ react 團隊根據自己的實踐所獲得的經驗，覺得了預留 11ms 給�
 2. 建立變數
 
    - 任務相關變數
-     1. `currentPriorityLevel` - 紀錄當前處理的任務優先級，供之後判斷是否優先執行
+     1. `currentPriorityLevel` - 紀錄當前處理的任務優先級，供之後合成事件 `getEventPriority()` `message` 依照 scheduler 中的優先級，返回不同的事件優先級
      2. `currentTask`: 指向當前正在執行的
      3. `taskQueue`: 任務池（最小堆）
      4. `taskIdCounter`: 任務 id 累加紀錄
@@ -129,7 +187,7 @@ react 團隊根據自己的實踐所獲得的經驗，覺得了預留 11ms 給�
 8. 建立取得當前正在執行的任務的優先等級函式 & export
 9. 是否要終止任務，把控制權交給主線程函式 & export
 
-## 三把鎖的意義 - 避免重複調度
+### 三把鎖的意義 - 避免重複調度
 
 簡單來說 scheduler 有兩個循環迴圈，
 第一個是 和瀏覽器申請非同步(MessageChannel)的回調，他會在任務堆沒有完全清空之前持續申請時間切片
@@ -143,7 +201,7 @@ react 團隊根據自己的實踐所獲得的經驗，覺得了預留 11ms 給�
 * `isMessageLoopRunning`： 紀錄時間切片調度確定已經完整結束，無數個 申請時間切片和 workLoop 之後，task queue 終於被清空。
   (requestHostCallback 發起調度時間切片 schedulePerformWorkUntilDeadline 前，被設成 true。performWorkUntilDeadline 中，task queue 被清空，所有任務都執行完之後被設定為 false)
 
-## 1. 建立任務型別
+### 1. 建立任務型別
 
 ```ts
 // 任務要執行的回調，有可能會再次回傳函式，就會再加入任務堆
@@ -165,18 +223,22 @@ export type Task = {
 };
 ```
 
-## 2. 建立變數
+### 2. 建立變數
 
 ```ts
 /** 任務相關變數 */
-/** 任務 id 累加紀錄 */
+/** 任務 id 累加紀錄，標註唯一性 */
 let taskIdCounter = 1;
 /** 任務池，最小堆 **/
 const taskQueue: Array<Task> = [];
 /** 指向當前正在執行的 **/
 let currentTask: Task | null = null;
 /** 紀錄當前處理的任務優先級，供之後判斷是否優先執行 */
-let currentPriorityLevel: PriorityLevel = NoPriority;
+let currentPriorityLevel: PriorityLevel = NoPriority; // 源碼當中是 NormalPriority
+/** 時間切片的起始值，時間戳 */
+let startTime = -1;
+/** 時間切片的時間段，寫死 5ms */
+let frameInterval = frameYieldMs; // 5
 
 /** 建立三把鎖 */
 /** 1. 紀錄 主線程處理時間切片調度確定已經開始 */
@@ -187,15 +249,16 @@ let isMessageLoopRunning = false;
 let isPerformingWork = false;
 ```
 
-### `scheduleCallback`
+### scheduleCallback
 
 1.  當有新的任務時，會按照優先等級，封裝成 Task 物件，推入最小堆，
 2.  看主線程是否還在忙調度 `isHostCallbackScheduled`?
     1. 沒有，啟動主線程，開始調度 `requestHostCallback`。
     2. `isHostCallbackScheduled`設定為`true`
 
+> 源碼當中叫做 `unstable_scheduleCallback`
+
 ```ts
-let taskIdCounter = 1;
 /**
  * * 任務調度器的入口，某任務進入調度器，等待調度
  * @param priorityLevel
@@ -213,17 +276,16 @@ function scheduleCallback(priorityLevel: PriorityLevel, callback: Callback) {
     case UserBlockingPriority:
       timeout = userBlockingPriorityTimeout;
       break;
-    case NormalPriority:
-      timeout = normalPriorityTimeout;
       break;
     case LowPriority:
       timeout = lowPriorityTimeout;
       break;
     case IdlePriority:
       timeout = maxSigned31BitInt;
+      break;
     case NormalPriority:
     default:
-      timeout = frameYieldMs;
+      timeout = normalPriorityTimeout;
       break;
   }
   const expirationTime = startTime + timeout;
@@ -270,6 +332,8 @@ function requestHostCallback() {
 
 申請時間切片，申請宏任務
 
+> 在源碼當中有實現兼容性，如果不支援 `MessageChannel`，則改用 `setImmeditate`
+
 ```ts
 const channel = new MessageChannel();
 const port2 = channel.port2;
@@ -309,9 +373,12 @@ function schedulePerformWorkUntilDeadline() {
    2. 沒有: 把時間切片部門設定為閒置：`isMessageLoopRunning  = false`
 
 ```ts
+// 時間切片的起始，時間戳
+let startTime = -1;
 function performWorkUntilDeadline() {
   if (isMessageLoopRunning) {
     const currentTime = getCurrentTime();
+    // 供時間切片使用，看什麼時候達到 5ms
     startTime = currentTime;
     let hasMoreWork = true;
 
@@ -434,14 +501,16 @@ function shouldYieldToHost() {
 }
 ```
 
-### 調度延遲任務
+## 調度延遲任務
 
 `scheduler` 當中有延遲任務的代碼邏輯，但是這塊代碼在 react v18.2 中沒有用到。
+在任務加入 `scheduleCallback` 時，就傳入必須要延遲的時間，待時間到後才能放入主要的任務池 `taskQueue`。
+
 延遲任務在到執行時間之前有自己的任務池！`timeQueue`
-在`scheduleCallback`當中會把有延遲的任務塞入延遲任務池當中。
+以延遲時間＋現在時間 = 預計未來開始執行的時間，當作排序依據
 
 1. `scheduleCallback`
-   1. 新增參數`options:{delay:number}`，延後執行的時間，把它加進開始時間`startTime`裡面。
+   1. 新增參數`options?:{delay:number}`，延後執行的時間，把它加進開始時間`startTime`裡面。
    2. 一樣跑建立任務物件的流程，之後判斷是否是延遲任務
       1. 是，`sortIndex = startTime`，用開始時間來決定最小堆的排序，越小表示越先開始。
       2. 把他放入延遲的任務堆裡。
@@ -466,9 +535,10 @@ function shouldYieldToHost() {
 
 ### 延時任務轉普通任務的時機?
 
-- 1. 開始 task queue 的 work loop 之前
-- 2. 在 work loop 的每一個迭代中，當執行完一次任務後
-- 3. 當 work loop 中斷後且 task queue 已經清空，scheduler 就會嘗試去檢查 timer queue，看看是否有延遲到期的任務可以轉移到 task queue 中去
+1. 在放入任務堆後，啟動計時器，時間到，會執行 `handleTimeout` ，裡面會檢查一次
+2. 在 workLoop 中， while 回圈之前
+3. 在 workLoop 的每一個迭代中，當執行完一次任務後
+4. 當 workLoop 因為『時間到並且任務還沒到期』而中斷後，且 task queue 已經清空，scheduler 就會嘗試去檢查 timer queue，看看是否有延遲到期的任務可以轉移到 task queue 中去
 
 ### `scheduleCallback` 加入延遲任務參數
 
@@ -580,6 +650,7 @@ function handleTimeout(currentTime: number) {
   // 1. 主線程是否在進行計時器調度
   isHostTimeoutScheduled = false;
   // 2. 進入整個延遲任務堆處理
+  // 如果 timerQueue中 "有效"任務到達執行時間，就放到 taskQueue 中
   advanceTimers(currentTime);
 
   // 3. 主線程是否在調度中
@@ -620,7 +691,7 @@ function advanceTimers(currentTime: number) {
 }
 ```
 
-### 實現真正的 time slicing
+## 實現真正的 time slicing
 
 task queue 有三個任務，第一個用時 3ms，第二個用時 4ms，第三個用時 5ms，那麼這個 work loop 就會佔用主執行緒 7ms 才會退出。 scheduler ，對 work loop 佔用時間的檢查只會發生在「任務執行之前」。
 所以單靠 scheduler 會是 `[[3ms, 4ms], [5ms]]` ，第一個時間片就執行了 7ms!
@@ -639,7 +710,7 @@ function workLoopConcurrent() {
 
 ---
 
-學習資料：
+## 學習資料
 
 > (2023 年，你是時候要掌握 react 的並發渲染了(2) - scheduler)[https://juejin.cn/post/7278597256957935628#heading-24]
 > (bubucuo React18 底层源码深入剖析)[https://github.com/bubucuo/mini-react]

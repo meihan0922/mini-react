@@ -88,6 +88,11 @@
 
 # mini-react
 
+- [scheduler 筆記及實現](./packages/scheduler/README.md)
+- [二叉堆算法筆記及實現](./packages/scheduler/heap.md)
+
+---
+
 react 中的階段：
 
 - triggering: a render （把客人的點單分發到廚房)
