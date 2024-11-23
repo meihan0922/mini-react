@@ -146,6 +146,9 @@ function defineRefPropWarningGetter(props, displayName) {
  * @internal
  */
 function ReactElement(type, key, ref, self, source, owner, props) {
+  /**
+   * react element 對象的初步長相
+   */
   const element = {
     // This tag allows us to uniquely identify this as a React Element
     $$typeof: REACT_ELEMENT_TYPE,
@@ -198,20 +201,20 @@ function ReactElement(type, key, ref, self, source, owner, props) {
     }
   }
 
+  // console.log(
+  //   "%creact-debugger/src/react/packages/react/src/jsx/ReactJSXElement.js:203 element",
+  //   "color: #007acc;",
+  //   element
+  // );
   return element;
 }
-
 /**
  * https://github.com/reactjs/rfcs/pull/107
  * @param {*} type
- * @param {object} props
+ * @param {object} props: ref, name, key...
  * @param {string} key
  */
 export function jsx(type, config, maybeKey) {
-  console.log(
-    "react-debugger/src/react/packages/react/src/jsx/ReactJSXElement.js",
-    "jsx"
-  );
   let propName;
 
   // Reserved names are extracted
@@ -282,10 +285,6 @@ export function jsx(type, config, maybeKey) {
  * @param {string} key
  */
 export function jsxDEV(type, config, maybeKey, source, self) {
-  console.log(
-    "react-debugger/src/react/packages/react/src/jsx/ReactJSXElement.js",
-    "jsxDEV"
-  );
   if (__DEV__) {
     // 後面 for in 循環用到的 props key屬性
     // 因為會不斷賦值，寫成 let 用同一變數，省效能
@@ -328,6 +327,7 @@ export function jsxDEV(type, config, maybeKey, source, self) {
     }
 
     // Remaining properties are added to a new props object
+    // config 過濾掉 key 和 ref
     for (propName in config) {
       if (
         hasOwnProperty.call(config, propName) &&
@@ -338,6 +338,7 @@ export function jsxDEV(type, config, maybeKey, source, self) {
     }
 
     // Resolve default props
+    // 為 props 屬性賦默認值 defaultProps
     if (type && type.defaultProps) {
       const defaultProps = type.defaultProps;
       for (propName in defaultProps) {
@@ -363,6 +364,7 @@ export function jsxDEV(type, config, maybeKey, source, self) {
       }
     }
 
+    // 返回 reactElement
     return ReactElement(
       type,
       key,

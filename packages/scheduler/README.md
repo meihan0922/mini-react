@@ -8,6 +8,7 @@
       - [為什麼不是微任務？](#為什麼不是微任務)
       - [React 為什麼選擇使用 MessageChannel 來實現類似 requestIdleCallback 的功能，主要是因為以下幾個原因：](#react-為什麼選擇使用-messagechannel-來實現類似-requestidlecallback-的功能主要是因為以下幾個原因)
         - [為什麼不能用 setTimeout 來代替 MessageChannel？不是都是呼叫執行宏任務嗎？](#為什麼不能用-settimeout-來代替-messagechannel不是都是呼叫執行宏任務嗎)
+        - [window.requestAnimationFrame \& window.requestIdleCallback](#windowrequestanimationframe--windowrequestidlecallback)
     - [如何避免餓死現象?](#如何避免餓死現象)
       - [time slicing](#time-slicing)
       - [aging](#aging)
@@ -116,6 +117,106 @@ react 按照使用者的瀏覽器支援度，選擇使用其中一種非同步 a
 - MessageChannel 的執行時機會早於 setTimeout
 - setTimeout(fn,0) 所建立的宏任務，會有至少 4ms 的執行時差
 - 如果目前環境不支援 MessageChannel 時，會預設使用 setTimeout
+
+##### window.requestAnimationFrame & window.requestIdleCallback
+
+- 幀的概念
+  - 大多數螢幕都是一秒六十次，大概是 16.6 毫秒一幀，幀數(fps)越高越流暢。
+  - 每一幀包含樣式計算佈局和繪製
+  - JS 引擎和頁面繪製在同一線程當中，GUI 渲染和 JS 執行是互斥的，如果 JS 引擎任務執行時間過長，就會推遲渲染
+- 為了讓動畫等任務可以按照優先級渲染，需要使用 window.requestAnimationFrame & window.requestIdleCallback
+
+![flow](./assets/flow.svg)
+
+```js
+/**  requestAnimationFrame，
+- 參數 time: 表執行開始到現在的時間，相當於 performance.now()
+**/
+let start;
+let root = document.getElementById("root");
+function animate(timestart) {
+  // timestart 相當於 performance.now()
+  //   console.log(timestart);
+  if (!start) {
+    start = timestart; // 只是記錄一開始執行的時間
+  }
+  //   console.log("ttttt", timestart, timestart - start);
+  root.style.transform = `translate(${+timestart * 0.1}px)`;
+  if (timestart < 2000) {
+    // 必須主動呼叫下一次渲染
+    window.requestAnimationFrame(animate);
+  }
+}
+window.requestAnimationFrame(animate);
+```
+
+```js
+// requestIdleCallback：在主要任務執行完後有空閒時間就可以執行
+// 可執行低優先的任務
+// 實例方法：IdleDeadline.timeRemaining() 表示現在 一幀中剩下的時間
+function sleep(duration) {
+  let now = Date.now();
+  while (duration + now > Date.now()) {
+    return;
+  }
+}
+// 空閒時回調
+let works = [
+  () => {
+    console.log("task 1");
+    sleep(300);
+  },
+  () => {
+    console.log("task 2");
+    sleep(300);
+  },
+  () => {
+    console.log("task 3");
+  },
+  () => {
+    console.log("task 4");
+  },
+  () => {
+    console.log("task 5");
+  },
+];
+function runWorks() {
+  let w = works.shift();
+  w();
+}
+function progress(deadline) {
+  // 如果有剩餘時間就執行任務
+  // 實例方法：https://developer.mozilla.org/zh-CN/docs/Web/API/IdleDeadline
+  // IdleDeadline.timeRemaining()
+  let remaining = deadline.timeRemaining();
+  console.log("剩下多少時間：", remaining);
+  // 如果有時間而且還有任務就執行
+  if (remaining > 0 && works.length > 0) {
+    runWorks();
+  }
+  if (works.length > 0) {
+    window.requestIdleCallback(progress);
+  }
+}
+window.requestIdleCallback(progress);
+
+/**
+     * 剩下多少時間： 11.7
+       task 1
+       剩下多少時間： 12.6
+       task 2
+       剩下多少時間： 9.3
+       task 3
+       剩下多少時間： 49.9 // 為何會變成 49ms??
+       task 4
+       剩下多少時間： 49.9
+       task 5
+
+       如果執行的任務較少，瀏覽器會把一幀的時間拉長，
+       讓頁面不用頻繁的更新，可以處理更多不重要的程式碼 requestIdleCallback，
+       但用戶在變成100ms以上才會感受到變慢
+     * **/
+```
 
 ### 如何避免餓死現象?
 

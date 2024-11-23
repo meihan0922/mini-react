@@ -11,8 +11,7 @@ import ReactCurrentDispatcher from "./ReactCurrentDispatcher";
 import ReactCurrentCache from "./ReactCurrentCache";
 
 function resolveDispatcher() {
-  debugger;
-  console.log("ReactCurrentDispatcher", ReactCurrentDispatcher);
+  // console.log("ReactCurrentDispatcher", ReactCurrentDispatcher);
   const dispatcher = ReactCurrentDispatcher.current;
   if (__DEV__) {
     if (dispatcher === null) {
@@ -86,8 +85,6 @@ export function useContext(Context) {
 }
 
 export function useState(initialState) {
-  debugger;
-  console.log(initialState);
   const dispatcher = resolveDispatcher();
   return dispatcher.useState(initialState);
 }

@@ -467,8 +467,8 @@ export function createFiberFromTypeAndProps(
   let fiberTag = IndeterminateComponent;
   // The resolved type is set if we know what the final type will be. I.e. it's not lazy.
   let resolvedType = type;
-  // * 如果是類組件的話
   if (typeof type === "function") {
+    // * 如果是類組件的話(extends 的時候 有被加上 .isReactComponent)
     if (shouldConstruct(type)) {
       fiberTag = ClassComponent;
       if (__DEV__) {
@@ -609,7 +609,7 @@ export function createFiberFromTypeAndProps(
     }
   }
 
-  // *
+  // * 最後創建 Fiber
   const fiber = createFiber(fiberTag, pendingProps, key, mode);
   fiber.elementType = type;
   fiber.type = resolvedType;

@@ -96,7 +96,6 @@ function renderSubtreeIntoContainer(
 }
 
 function createRoot(container, options) {
-  console.log("createRoot");
   if (__DEV__) {
     if (!Internals.usingClientEntryPoint && !__UMD__) {
       console.error(

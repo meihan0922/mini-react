@@ -80,14 +80,14 @@ let isFlushingWork = false;
 let currentEventTransitionLane = NoLane;
 
 export function ensureRootIsScheduled(root) {
-  console.log(
-    "%censureRootIsScheduled[80]",
-    "color: #FFFFFF; font-size: 14px; background: #333333;"
-  );
-  console.log("註冊調度任務，Scheduler調度，構造 fiber");
-  console.log(
-    "是否需要註冊新的調度，然後註冊一個新的調度來執行我們的Fiber生成邏輯"
-  );
+  // console.log(
+  //   "%censureRootIsScheduled[80]",
+  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
+  // );
+  // console.log("註冊調度任務，Scheduler調度，構造 fiber");
+  // console.log(
+  //   "是否需要註冊新的調度，然後註冊一個新的調度來執行我們的Fiber生成邏輯"
+  // );
   // This function is called whenever a root receives an update. It does two
   // things 1) it ensures the root is in the root schedule, and 2) it ensures
   // there's a pending microtask to process the root schedule.
@@ -111,9 +111,9 @@ export function ensureRootIsScheduled(root) {
   // we process the schedule. If it's false, then we can quickly exit flushSync
   // without consulting the schedule.
   mightHavePendingSyncWork = true;
-  console.log(
-    "產生兩類調度任務, 一個是SyncWork，另一個是ConcurrentWork，他們分別對應同步任務和可中斷任務"
-  );
+  // console.log(
+  //   "產生兩類調度任務, 一個是SyncWork，另一個是ConcurrentWork，他們分別對應同步任務和可中斷任務"
+  // );
   // At the end of the current event, go through each of the roots and ensure
   // there's a task scheduled for each one at the correct priority.
   if (__DEV__ && ReactCurrentActQueue.current !== null) {
@@ -301,10 +301,10 @@ function processRootScheduleInMicrotask() {
 }
 
 function scheduleTaskForRootDuringMicrotask(root, currentTime) {
-  console.log(
-    "%cscheduleTaskForRootDuringMicrotask[294]",
-    "color: #FFFFFF; font-size: 14px; background: #333333;"
-  );
+  // console.log(
+  //   "%cscheduleTaskForRootDuringMicrotask[294]",
+  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
+  // );
   // This function is always called inside a microtask, or at the very end of a
   // rendering task right before we yield to the main thread. It should never be
   // called synchronously.
@@ -317,7 +317,7 @@ function scheduleTaskForRootDuringMicrotask(root, currentTime) {
 
   // Check if any lanes are being starved by other work. If so, mark them as
   // expired so we know to work on those next.
-  console.log("把優先級低但是過期的任務標註為高優先級");
+  // console.log("把優先級低但是過期的任務標註為高優先級");
   markStarvedLanesAsExpired(root, currentTime);
 
   // Determine the next lanes to work on, and their priority.

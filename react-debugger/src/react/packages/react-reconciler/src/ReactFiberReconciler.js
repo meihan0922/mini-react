@@ -80,18 +80,18 @@ import {
 } from "./ReactFiberHotReloading";
 import ReactVersion from "shared/ReactVersion";
 export { createPortal } from "./ReactPortal";
-export {
-  createComponentSelector,
-  createHasPseudoClassSelector,
-  createRoleSelector,
-  createTestNameSelector,
-  createTextSelector,
-  getFindAllNodesFailureDescription,
-  findAllNodes,
-  findBoundingRects,
-  focusWithin,
-  observeVisibleRects,
-} from "./ReactTestSelectors";
+// export {
+//   createComponentSelector,
+//   createHasPseudoClassSelector,
+//   createRoleSelector,
+//   createTestNameSelector,
+//   createTextSelector,
+//   getFindAllNodesFailureDescription,
+//   findAllNodes,
+//   findBoundingRects,
+//   focusWithin,
+//   observeVisibleRects,
+// } from "./ReactTestSelectors";
 export { startHostTransition } from "./ReactFiberHooks";
 
 // 0 is PROD, 1 is DEV.
@@ -207,9 +207,10 @@ function findHostInstanceWithWarning(component, methodName) {
 }
 /**
  *
- * @param {*} containerInfo: 指的就是 Container，FiberRoot
+ * @param {*} containerInfo: 指的就是容器，ex:div#root
  * @param {*} tag: RootTag -> ConcurrentRoot
  * @param {*} hydrationCallbacks -> null
+ * 剩下是 createRoot options?
  * @returns
  */
 export function createContainer(

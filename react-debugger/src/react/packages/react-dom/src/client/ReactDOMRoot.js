@@ -150,15 +150,16 @@ ReactDOMHydrationRoot.prototype.unmount = ReactDOMRoot.prototype.unmount =
  * 創造根節點容器
  * @param {*} container: Element | Document | DocumentFragment 渲染的容器 必須要是 dom element
  * @param {*} options?
- * @returns: RootType
+ *   可選： onRecoverableError - 回調函式，在 react 從異常錯誤中恢復時調用
+ *   可選： identifierPrefix - react 用來配合 useId 生成 id 的字符串前綴，在同個頁面下使用多個根節點時，可以避免衝突
+ * @returns: RootType: 返回 React.DOMRoot 實例，上面有 render, unmount, _internalRoot 三個屬性
+ *
  * 1. 檢查 container 是 DOM 嗎？看是否要報錯。
- * 2. 創建 rootFiber 和 fiberRoot 把他們關聯起來
- * 3. 事件代理
- * 4. **createContainer 創建 FiberRoot，即源碼裡面的 root，也就是根節點**
- * 5. 返回 React.DOMRoot 實例
+ * 2. 檢查 options
+ * 3. **createContainer 創建 FiberRoot，即源碼裡面的 root，也就是根節點**
+ * 4. 返回 React.DOMRoot 實例
  */
 export function createRoot(container, options) {
-  console.log("createRoot");
   // 判斷是否符合容器的規範，會檢查 nodeType
   // 可以是元素節點、document節點、註釋節點（會渲染到註釋之前）
   if (!isValidContainer(container)) {
@@ -215,7 +216,7 @@ export function createRoot(container, options) {
     }
   }
 
-  // 創建 rootFiber 和 fiberRoot 把他們關聯起來，最後返回 FiberRoot
+  // 創建 rootFiber 和 fiberRoot，把他們關聯起來，循環構造，最後返回 FiberRoot
   // FiberRoot.current = rootFiber;
   // rootFiber.stateNode = FiberRoot;
   const root = createContainer(
@@ -229,12 +230,15 @@ export function createRoot(container, options) {
     transitionCallbacks
   );
 
-  // 紀錄 container 是根 Fiber
-  // container['__reactContainer$' + randomKey] = root.current
+  /**
+   * 紀錄 containerNode （ex: div#root）是根 Fiber
+   * containerNode['__reactContainer$' + randomKey] = root.current // rootFiber
+   * 後續用於 getClosestInstanceFromNode 和 getInstanceFromNode 中，用於根據根 DOM 取 Fiber 值
+   */
   markContainerAsRoot(root.current, container);
   Dispatcher.current = ReactDOMClientDispatcher;
 
-  // 看是不是註釋節點
+  // 看是不是註釋節點，只是為了兼容 FB 的老代碼
   const rootContainerElement =
     container.nodeType === COMMENT_NODE ? container.parentNode : container;
   // 事件代理，在 container 加上原生事件，通過事件冒泡捕捉具體內容
@@ -248,6 +252,12 @@ export function createRoot(container, options) {
    * }
    */
   // this._internalRoot = internalRoot
+
+  // console.log(
+  //   "----%creact-debugger/src/react/packages/react-dom/src/client/ReactDOMRoot.js:251 root",
+  //   "color: #007acc;",
+  //   root
+  // );
   return new ReactDOMRoot(root);
 }
 

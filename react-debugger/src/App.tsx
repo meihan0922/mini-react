@@ -3,7 +3,6 @@ import { useState } from "react";
 import * as ReactDOM from "react-dom/client";
 
 function Count({ initCount }: { initCount: number }) {
-  console.log("initCount", initCount);
   const [c, setC] = useState(initCount);
   return (
     <div>

@@ -15,6 +15,7 @@ export function createContainer(containerInfo: Container, tag: RootTag) {
 // 4. scheduleUpdateOnFiber 啟動調度
 // 5. entangleTranstions
 export function updateContainer(element: ReactNodeList, container: FiberRoot) {
+  // console.log(element);
   // 組件初次渲染
 
   // 1. 獲取 current, lane

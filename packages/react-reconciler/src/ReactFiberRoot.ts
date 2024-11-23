@@ -38,11 +38,11 @@ export function createFiberRoot(
 
   // Cyclic construction. This cheats the type system right now because
   // stateNode is any.
-  // 創建 fiber 根節點
+  // 創建 fiber 根節點!
   const uninitializedFiber = createHostRootFiber(tag);
-  // FiberRootNode 的 current 樹指向 fiber 根節點
+  // FiberRootNode 的 current 指向 HostRootFiber
   root.current = uninitializedFiber;
-  // fiber 的 stateNode 也要指向 FiberRoot
+  // HostRootFiber 的 stateNode 指向 FiberRootNode
   uninitializedFiber.stateNode = root;
 
   // 初始時，子節點會變成 element 掛載到 memoizedState 上

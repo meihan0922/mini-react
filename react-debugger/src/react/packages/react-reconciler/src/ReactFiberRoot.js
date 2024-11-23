@@ -127,7 +127,7 @@ export function createFiberRoot(
   transitionCallbacks
 ) {
   // $FlowFixMe[invalid-constructor] Flow no longer supports calling new on functions
-  // ! 創建 fiberRoot
+  // ! 創建 fiberRoot，實例化 FiberRootNode
   const root = new FiberRootNode(
     containerInfo,
     tag,
@@ -145,7 +145,8 @@ export function createFiberRoot(
 
   // Cyclic construction. This cheats the type system right now because
   // stateNode is any.
-  // 創建一個 tag 是 HostRoot 的 RootFiber
+  // ! 創建一個 tag 是 HostRoot 的 RootFiber
+  // ! RootFiber 是 Fiber
   const uninitializedFiber = createHostRootFiber(
     tag, // 當前的模式
     isStrictMode,
@@ -153,8 +154,8 @@ export function createFiberRoot(
   );
   // !重點：循環構造
   // 建立 fiberRoot 和 rootFiber 的關係
-  root.current = uninitializedFiber; // Fiber
-  uninitializedFiber.stateNode = root; // FiberRoot
+  root.current = uninitializedFiber; // fiberRootNode.current => Fiber
+  uninitializedFiber.stateNode = root; // FiberRoot.stateNode => fiberRootNode
 
   if (enableCache) {
     const initialCache = createCache();
@@ -183,7 +184,11 @@ export function createFiberRoot(
     };
     uninitializedFiber.memoizedState = initialState;
   }
-  // 初始化 updateQueue
+  /**
+   * 初始化 updateQueue
+   * 一個 fiber 可以有多個更新，但最終是批量處理
+   * 先儲存到 fiber 的 updateQueue 上
+   */
   initializeUpdateQueue(uninitializedFiber);
 
   return root;

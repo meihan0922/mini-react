@@ -90,8 +90,8 @@ import {
   SimpleMemoComponent,
   Profiler,
   HostComponent,
-  HostHoistable,
-  HostSingleton,
+  // HostHoistable,
+  // HostSingleton,
 } from "./ReactWorkTags";
 import { ConcurrentRoot, LegacyRoot } from "./ReactRootTags";
 
@@ -234,7 +234,7 @@ import {
   onCommitRoot as onCommitRootDevTools,
   onPostCommitRoot as onPostCommitRootDevTools,
 } from "./ReactFiberDevToolsHook";
-import { onCommitRoot as onCommitRootTestSelector } from "./ReactTestSelectors";
+// import { onCommitRoot as onCommitRootTestSelector } from "./ReactTestSelectors";
 import { releaseCache } from "./ReactFiberCacheComponent";
 import {
   isLegacyActEnvironment,
@@ -653,12 +653,12 @@ function requestRetryLane(fiber) {
 }
 
 export function scheduleUpdateOnFiber(root, fiber, lane) {
-  console.log(
-    "%cscheduleUpdateOnFiber[655]",
-    "color: #FFFFFF; font-size: 14px; background: #333333;"
-  );
-  console.log("自底向上更新整個優先權並會傳回更新後的整個Fiber 樹的根節點");
-  console.log("標記Root 的更新");
+  // console.log(
+  //   "%cscheduleUpdateOnFiber[655]",
+  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
+  // );
+  // console.log("自底向上更新整個優先權並會傳回更新後的整個Fiber 樹的根節點");
+  // console.log("標記Root 的更新");
   if (__DEV__) {
     if (isRunningInsertionEffect) {
       console.error("useInsertionEffect must not schedule updates.");
@@ -687,9 +687,9 @@ export function scheduleUpdateOnFiber(root, fiber, lane) {
   }
 
   // Mark that the root has a pending update.
-  console.log(
-    "標記 root 有更新，將 update 的 lane 插入到 root.pendingLanes 中"
-  );
+  // console.log(
+  //   "標記 root 有更新，將 update 的 lane 插入到 root.pendingLanes 中"
+  // );
   markRootUpdated(root, lane);
 
   if (
@@ -816,10 +816,10 @@ export function isUnsafeClassRenderPhaseUpdate(fiber) {
 // This is the entry point for every concurrent task, i.e. anything that
 // goes through Scheduler.
 export function performConcurrentWorkOnRoot(root, didTimeout) {
-  console.log(
-    "%cperformConcurrentWorkOnRoot[813]",
-    "color: #FFFFFF; font-size: 14px; background: #333333;"
-  );
+  // console.log(
+  //   "%cperformConcurrentWorkOnRoot[813]",
+  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
+  // );
   if (enableProfilerTimer && enableProfilerNestedUpdatePhase) {
     resetNestedUpdateFlag();
   }
@@ -867,10 +867,10 @@ export function performConcurrentWorkOnRoot(root, didTimeout) {
     !includesBlockingLane(root, lanes) &&
     !includesExpiredLane(root, lanes) &&
     (disableSchedulerTimeoutInWorkLoop || !didTimeout);
-  console.log(
-    "%cperformConcurrentWorkOnRoot start Render---[870]",
-    "color: #FFFFFF; font-size: 14px; background: #333333;"
-  );
+  // console.log(
+  //   "%cperformConcurrentWorkOnRoot start Render---[870]",
+  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
+  // );
   let exitStatus = shouldTimeSlice
     ? renderRootConcurrent(root, lanes)
     : renderRootSync(root, lanes);
@@ -1493,10 +1493,10 @@ function resetWorkInProgressStack() {
 }
 
 function prepareFreshStack(root, lanes) {
-  console.log(
-    "%cprepareFreshStack[1487]",
-    "color: #FFFFFF; font-size: 14px; background: #333333;"
-  );
+  // console.log(
+  //   "%cprepareFreshStack[1487]",
+  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
+  // );
   root.finishedWork = null;
   root.finishedLanes = NoLanes;
 
@@ -1530,7 +1530,7 @@ function prepareFreshStack(root, lanes) {
   workInProgressRootPingedLanes = NoLanes;
   workInProgressRootConcurrentErrors = null;
   workInProgressRootRecoverableErrors = null;
-  console.log("創造 WorkInProgress", workInProgressRoot);
+  // console.log("創造 WorkInProgress", workInProgressRoot);
 
   finishQueueingConcurrentUpdates();
 
@@ -1963,13 +1963,13 @@ function renderRootSync(root, lanes) {
 // The work loop is an extremely hot path. Tell Closure not to inline it.
 /** @noinline */
 function workLoopSync() {
-  console.log(
-    "%cworkLoopSync---------",
-    "color: #FFFFFF; font-size: 14px; background: #333333;"
-  );
-  console.log(
-    "performUnitOfWork和completeUnitOfWork合作完成了一個深度優先搜尋的邏輯，遍歷了整個DOM 樹，產生了Fiber 樹"
-  );
+  // console.log(
+  //   "%cworkLoopSync---------",
+  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
+  // );
+  // console.log(
+  //   "performUnitOfWork和completeUnitOfWork合作完成了一個深度優先搜尋的邏輯，遍歷了整個DOM 樹，產生了Fiber 樹"
+  // );
   // Perform work without checking if we need to yield between fiber.
   while (workInProgress !== null) {
     performUnitOfWork(workInProgress);
@@ -1977,10 +1977,10 @@ function workLoopSync() {
 }
 
 function renderRootConcurrent(root, lanes) {
-  console.log(
-    "%crenderRootConcurrent[2210]",
-    "color: #FFFFFF; font-size: 14px; background: #333333;"
-  );
+  // console.log(
+  //   "%crenderRootConcurrent[2210]",
+  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
+  // );
   const prevExecutionContext = executionContext;
   executionContext |= RenderContext;
   const prevDispatcher = pushDispatcher(root.containerInfo);
@@ -2241,10 +2241,10 @@ function workLoopConcurrent() {
 }
 
 function performUnitOfWork(unitOfWork) {
-  console.log(
-    "%cperformUnitOfWork[2219]",
-    "color: #FFFFFF; font-size: 14px; background: #333333;"
-  );
+  // console.log(
+  //   "%cperformUnitOfWork[2219]",
+  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
+  // );
 
   // The current, flushed, state of this fiber is the alternate. Ideally
   // nothing should rely on this, but relying on it here means that we don't

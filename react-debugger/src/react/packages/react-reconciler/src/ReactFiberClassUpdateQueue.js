@@ -147,11 +147,13 @@ if (__DEV__) {
 // 初始化 `fiber.updateQueue`，在 beginWork 階段，updateHostRoot 中使用 processUpdateQueue 再具體賦值
 export function initializeUpdateQueue(fiber) {
   const queue = {
+    // 基本狀態，比方類組件初次掛載更新存初始狀態、頁面的初次渲染，root掛載就是存element
     baseState: fiber.memoizedState,
     // 單鏈表的解構 會一路指向 lastBaseUpdate
     firstBaseUpdate: null,
-    // 只是為了快速比較兩個單鏈表
+    // 紀錄尾節點，一般來說是不用紀錄尾節點的，只是為了快速比較兩個單鏈表，用尾節點比較
     lastBaseUpdate: null,
+    // 新得到的 update 會放在此，處理完後，會轉移到 BaseUpdate 上
     shared: {
       pending: null, // 正在掛載的更新，單向循環鏈表
       lanes: NoLanes, // Lanes
@@ -437,14 +439,14 @@ export function processUpdateQueue(
   instance,
   renderLanes
 ) {
-  console.log(
-    "%cprocessUpdateQueue[436]",
-    "color: #FFFFFF; font-size: 14px; background: #333333;"
-  );
-  console.log("處理pending update，把他們轉移到 baseQueue");
-  console.log(
-    "pending update是單向循環鏈表，firstBaseUpdate, lastBaseUpdate 不是"
-  );
+  // console.log(
+  //   "%cprocessUpdateQueue[436]",
+  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
+  // );
+  // console.log("處理pending update，把他們轉移到 baseQueue");
+  // console.log(
+  //   "pending update是單向循環鏈表，firstBaseUpdate, lastBaseUpdate 不是"
+  // );
   // This is always non-null on a ClassComponent or HostRoot
   const queue = workInProgress.updateQueue;
 
@@ -579,7 +581,7 @@ export function processUpdateQueue(
           newLastBaseUpdate = newLastBaseUpdate.next = clone;
         }
 
-        console.log("遍歷 queue，根據update計算出最後結果newState");
+        // console.log("遍歷 queue，根據update計算出最後結果newState");
         // Process this update.
         newState = getStateFromUpdate(
           workInProgress,
@@ -650,7 +652,7 @@ export function processUpdateQueue(
     // that regardless.
     markSkippedUpdateLanes(newLanes);
     workInProgress.lanes = newLanes;
-    console.log("把newState掛到workInProgress.memoizedState");
+    // console.log("把newState掛到workInProgress.memoizedState");
     workInProgress.memoizedState = newState;
   }
 

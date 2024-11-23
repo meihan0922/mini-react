@@ -32,13 +32,13 @@ let concurrentQueuesIndex = 0;
 let concurrentlyUpdatedLanes = NoLanes;
 
 export function finishQueueingConcurrentUpdates() {
-  console.log(
-    "%cfinishQueueingConcurrentUpdates[34]",
-    "color: #FFFFFF; font-size: 14px; background: #333333;"
-  );
-  console.log(
-    "把 concurrentQueues 的內容掛載到 fiber.queue.pending上面，形成單向鏈表"
-  );
+  // console.log(
+  //   "%cfinishQueueingConcurrentUpdates[34]",
+  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
+  // );
+  // console.log(
+  //   "把 concurrentQueues 的內容掛載到 fiber.queue.pending上面，形成單向鏈表"
+  // );
   const endIndex = concurrentQueuesIndex;
   concurrentQueuesIndex = 0;
 
@@ -69,7 +69,7 @@ export function finishQueueingConcurrentUpdates() {
     }
 
     if (lane !== NoLane) {
-      console.log("自底向上更新整個優先級");
+      // console.log("自底向上更新整個優先級");
       markUpdateLaneFromFiberToRoot(fiber, update, lane);
     }
   }
@@ -80,11 +80,11 @@ export function getConcurrentlyUpdatedLanes() {
 }
 
 function enqueueUpdate(fiber, queue, update, lane) {
-  console.log(
-    "%cenqueueUpdate[74]",
-    "color: #FFFFFF; font-size: 14px; background: #333333;"
-  );
-  console.log("把fiber,queue,update,lane 放到 concurrentQueues，mergeLanes");
+  // console.log(
+  //   "%cenqueueUpdate[74]",
+  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
+  // );
+  // console.log("把fiber,queue,update,lane 放到 concurrentQueues，mergeLanes");
   // Don't update the `childLanes` on the return path yet. If we already in
   // the middle of rendering, wait until after it has completed.
   concurrentQueues[concurrentQueuesIndex++] = fiber;

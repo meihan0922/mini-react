@@ -370,7 +370,7 @@ export function jsxDEV(type, config, maybeKey, source, self) {
  * 4. 創建並且返回 react element
  */
 export function createElement(type, config, children) {
-  console.log("createElement", type, config, children);
+  // console.log("createElement", type, config, children);
   // 後面 for in 循環用到的 props key屬性
   // 因為會不斷賦值，寫成 let 用同一變數，省效能
   let propName;
