@@ -1303,13 +1303,13 @@ function isHostParent(fiber: Fiber) {
 
 有兩種使用方式，可以創造出文本節點
 
-1.
+第一種
 
 ```tsx
 createRoot(document.getElementById("root")!).render("abc123");
 ```
 
-2.
+第二種
 
 ```tsx
 const jsx = (
