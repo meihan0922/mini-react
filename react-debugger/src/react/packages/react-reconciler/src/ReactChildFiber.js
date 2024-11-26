@@ -272,6 +272,11 @@ function resolveLazy(lazyType) {
 // a compiler or we can do it manually. Helpers that don't need this branching
 // live outside of this function.
 function createChildReconciler(shouldTrackSideEffects) {
+  console.log(
+    "%c [ Reconcile ]: ",
+    "color: #fff; background: blue; font-size: 13px;",
+    ""
+  );
   // 刪除單個節點
   function deleteChild(returnFiber, childToDelete) {
     if (!shouldTrackSideEffects) {

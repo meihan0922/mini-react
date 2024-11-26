@@ -687,6 +687,7 @@ import {
   createContainer,
 } from "@mono/react-reconciler/src/ReactFiberReconciler";
 
+// 就是 ReactDOMRoot 的實例
 type RootType = {
   render: (children: ReactNodeList) => void;
   _internalRoot: FiberRoot;
@@ -704,6 +705,7 @@ ReactDOMRoot.prototype.render = function (children: ReactNodeList) {
   updateContainer(children, root);
 };
 
+// 返回 ReactDOMRoot 的實例
 function createRoot(
   container: Element | Document | DocumentFragment
 ): RootType {
@@ -720,15 +722,18 @@ export default { createRoot };
 
 > [!TIP] 源碼筆記
 > react-debugger/src/react/packages/react-reconciler/src/ReactFiberReconciler.js
+>
 > react-debugger/src/react/packages/react-reconciler/src/ReactFiberRoot.js
+> [ClassComponent 和 HostRoot 的 UpdateQueue](./UpdateQueue.md)
 
 手寫： @mono/react-reconciler/src/ReactFiberReconciler.ts
 
-1. 獲取 current, lane
-2. 創建 update // 這裡先略過
-3. update 入隊放到暫存區 // 這裡先略過
-4. scheduleUpdateOnFiber 啟動調度
-5. entangleTranstions // 這裡先略過
+- 源碼邏輯：
+  1. 獲取 current, lane(requestLane)// 手寫這裡先略過
+  2. 創建 update // 手寫這裡先略過
+  3. update 入隊放到 fiber.updateQueue 暫存區 // 手寫這裡先略過
+  4. scheduleUpdateOnFiber 啟動調度
+  5. entangleTranstions // 手寫這裡先略過
 
 ```ts
 import { ReactNodeList } from "@mono/shared/ReactTypes";
@@ -4708,6 +4713,7 @@ if (registrationNameDependencies[propKey]) {
 ```ts
 import { listenToAllSupportedEvents } from "@mono/react-dom-bindings/src/events/DOMPluginEventSystem";
 
+// 返回 ReactDOMRoot 的實例
 function createRoot(
   container: Element | Document | DocumentFragment
 ): RootType {

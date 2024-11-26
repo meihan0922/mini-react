@@ -185,7 +185,8 @@ export function createFiberRoot(
     uninitializedFiber.memoizedState = initialState;
   }
   /**
-   * 初始化 updateQueue
+   * 初始化 fiber.updateQueue，在初次渲染 createRoot 和類組件初次掛載 mountClassInstance 的時候都會調用
+   * 之後更新才能放進去，
    * 一個 fiber 可以有多個更新，但最終是批量處理
    * 先儲存到 fiber 的 updateQueue 上
    */

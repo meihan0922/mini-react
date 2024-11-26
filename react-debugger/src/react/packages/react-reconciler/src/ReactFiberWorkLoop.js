@@ -621,7 +621,9 @@ export function requestUpdateLane(fiber) {
   // The opaque type returned by the host config is internally a lane, so we can
   // use that directly.
   // TODO: Move this type conversion to the event priority module.
-  // * 內部的更新，比如說 flushSync，會通過上下文變數來跟蹤其優先值
+  // * 內部的更新，比如說 flushSync,setState，會通過上下文變數來跟蹤其優先值
+  // 會回傳變量
+  // TODO: 之後再回來看 走這段的更新
   const updateLane = getCurrentUpdatePriority();
   if (updateLane !== NoLane) {
     return updateLane;
@@ -633,7 +635,10 @@ export function requestUpdateLane(fiber) {
   // The opaque type returned by the host config is internally a lane, so we can
   // use that directly.
   // TODO: Move this type conversion to the event priority module.
-  // * 外部的更新，根據事件類型，向當前環境獲取對應的優先級
+  // * 外部的更新（從外部發起），根據事件類型，向當前環境獲取對應的優先級
+  // ex: createRoot 也算
+  // 初次渲染 回傳默認的優先級，defaultLane: 32
+  // react-debugger/src/react/packages/react-dom-bindings/src/client/ReactFiberConfigDOM.js
   const eventLane = getCurrentEventPriority();
   return eventLane;
 }
@@ -653,12 +658,13 @@ function requestRetryLane(fiber) {
 }
 
 export function scheduleUpdateOnFiber(root, fiber, lane) {
-  // console.log(
-  //   "%cscheduleUpdateOnFiber[655]",
-  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
-  // );
-  // console.log("自底向上更新整個優先權並會傳回更新後的整個Fiber 樹的根節點");
-  // console.log("標記Root 的更新");
+  console.log(
+    "%c [ scheduleUpdateOnFiber ]: ",
+    "color: #fff; background: #b9f; font-size: 13px;",
+    ""
+  );
+  // ! 自底向上更新整個優先權並會傳回更新後的整個Fiber 樹的根節點
+  // ! 標記Root 的更新
   if (__DEV__) {
     if (isRunningInsertionEffect) {
       console.error("useInsertionEffect must not schedule updates.");
@@ -687,9 +693,7 @@ export function scheduleUpdateOnFiber(root, fiber, lane) {
   }
 
   // Mark that the root has a pending update.
-  // console.log(
-  //   "標記 root 有更新，將 update 的 lane 插入到 root.pendingLanes 中"
-  // );
+  // ! 標記 root 有更新，將 update 的 lane 插入到 root.pendingLanes 中
   markRootUpdated(root, lane);
 
   if (
@@ -816,10 +820,11 @@ export function isUnsafeClassRenderPhaseUpdate(fiber) {
 // This is the entry point for every concurrent task, i.e. anything that
 // goes through Scheduler.
 export function performConcurrentWorkOnRoot(root, didTimeout) {
-  // console.log(
-  //   "%cperformConcurrentWorkOnRoot[813]",
-  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
-  // );
+  console.log(
+    "%c [ performConcurrentWorkOnRoot ]: ",
+    "color: #000; background: yellow; font-size: 13px;",
+    ""
+  );
   if (enableProfilerTimer && enableProfilerNestedUpdatePhase) {
     resetNestedUpdateFlag();
   }
@@ -867,10 +872,7 @@ export function performConcurrentWorkOnRoot(root, didTimeout) {
     !includesBlockingLane(root, lanes) &&
     !includesExpiredLane(root, lanes) &&
     (disableSchedulerTimeoutInWorkLoop || !didTimeout);
-  // console.log(
-  //   "%cperformConcurrentWorkOnRoot start Render---[870]",
-  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
-  // );
+
   let exitStatus = shouldTimeSlice
     ? renderRootConcurrent(root, lanes)
     : renderRootSync(root, lanes);
@@ -1530,8 +1532,9 @@ function prepareFreshStack(root, lanes) {
   workInProgressRootPingedLanes = NoLanes;
   workInProgressRootConcurrentErrors = null;
   workInProgressRootRecoverableErrors = null;
-  // console.log("創造 WorkInProgress", workInProgressRoot);
+  // ! 創造 WorkInProgress", workInProgressRoot
 
+  // ! 處理更新隊列
   finishQueueingConcurrentUpdates();
 
   if (__DEV__) {
@@ -1854,6 +1857,8 @@ function renderRootSync(root, lanes) {
     }
 
     workInProgressTransitions = getTransitionsForLanes(root, lanes);
+
+    // ! 這裏有先調用處理 updateQueue 陣列內(尚未掛載到 fiber.updateQueue)的更新
     prepareFreshStack(root, lanes);
   }
 
@@ -1955,6 +1960,7 @@ function renderRootSync(root, lanes) {
   workInProgressRootRenderLanes = NoLanes;
 
   // It's safe to process the queue now that the render phase is complete.
+  // ! 這裏再次調用處理 updateQueue 陣列內(尚未掛載到 fiber.updateQueue)的更新
   finishQueueingConcurrentUpdates();
 
   return workInProgressRootExitStatus;
@@ -1963,13 +1969,13 @@ function renderRootSync(root, lanes) {
 // The work loop is an extremely hot path. Tell Closure not to inline it.
 /** @noinline */
 function workLoopSync() {
-  // console.log(
-  //   "%cworkLoopSync---------",
-  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
-  // );
-  // console.log(
-  //   "performUnitOfWork和completeUnitOfWork合作完成了一個深度優先搜尋的邏輯，遍歷了整個DOM 樹，產生了Fiber 樹"
-  // );
+  console.log(
+    "%c [ workLoopSync ]: ",
+    "color: #fff; background: #000; font-size: 13px;",
+    ""
+  );
+  // ! performUnitOfWork和completeUnitOfWork合作完成了一個深度優先搜尋的邏輯，遍歷了整個DOM 樹，產生了Fiber 樹"
+
   // Perform work without checking if we need to yield between fiber.
   while (workInProgress !== null) {
     performUnitOfWork(workInProgress);
@@ -1977,10 +1983,11 @@ function workLoopSync() {
 }
 
 function renderRootConcurrent(root, lanes) {
-  // console.log(
-  //   "%crenderRootConcurrent[2210]",
-  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
-  // );
+  console.log(
+    "%c [ renderRootConcurrent ]: ",
+    "color: #fff; background: #bf2c9f; font-size: 13px;",
+    ""
+  );
   const prevExecutionContext = executionContext;
   executionContext |= RenderContext;
   const prevDispatcher = pushDispatcher(root.containerInfo);
@@ -2178,7 +2185,6 @@ function renderRootConcurrent(root, lanes) {
           }
         }
       }
-      console.log("__DEV__--------", __DEV__);
       if (__DEV__ && ReactCurrentActQueue.current !== null) {
         // `act` special case: If we're inside an `act` scope, don't consult
         // `shouldYield`. Always keep working until the render is complete.
@@ -2241,10 +2247,11 @@ function workLoopConcurrent() {
 }
 
 function performUnitOfWork(unitOfWork) {
-  // console.log(
-  //   "%cperformUnitOfWork[2219]",
-  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
-  // );
+  console.log(
+    "%c [ performUnitOfWork ]: ",
+    "color: #fff; background: purple; font-size: 13px;",
+    ""
+  );
 
   // The current, flushed, state of this fiber is the alternate. Ideally
   // nothing should rely on this, but relying on it here means that we don't
@@ -2613,6 +2620,11 @@ function commitRootImpl(
   transitions,
   renderPriorityLevel
 ) {
+  console.log(
+    "%c [ commitRootImpl ]: ",
+    "color: #fff; background: darkblue; font-size: 13px;",
+    ""
+  );
   do {
     // `flushPassiveEffects` will call `flushSyncUpdateQueue` at the end, which
     // means `flushPassiveEffects` will sometimes result in additional

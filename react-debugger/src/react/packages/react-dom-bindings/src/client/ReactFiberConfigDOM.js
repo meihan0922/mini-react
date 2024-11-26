@@ -490,7 +490,13 @@ export function createTextInstance(
 export function getCurrentEventPriority() {
   const currentEvent = window.event;
   if (currentEvent === undefined) {
-    // 沒有事件（初次渲染）就返回默認優先級 32
+    // 初次渲染
+    // console.log(
+    //   "%creact-debugger/src/react/packages/react-dom-bindings/src/client/ReactFiberConfigDOM.js:493 初次渲染",
+    //   "color: #007acc;",
+    //   currentEvent
+    // );
+    // 沒有事件 就返回默認優先級 32
     return DefaultEventPriority;
   }
   // 取得事件的優先級

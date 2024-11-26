@@ -65,9 +65,12 @@ function ReactDOMRoot(internalRoot) {
 }
 
 // $FlowFixMe[prop-missing] found when upgrading Flow
+// 服務端和客戶端用的 render 是一樣的
 ReactDOMHydrationRoot.prototype.render = ReactDOMRoot.prototype.render =
   // $FlowFixMe[missing-this-annot]
+  // children 就是我們放入的 <App/>，是 ReactNodeList
   function (children) {
+    // root -> FiberRootNode
     const root = this._internalRoot;
     if (root === null) {
       throw new Error("Cannot update an unmounted root.");
@@ -115,6 +118,7 @@ ReactDOMHydrationRoot.prototype.render = ReactDOMRoot.prototype.render =
   };
 
 // $FlowFixMe[prop-missing] found when upgrading Flow
+// react 18 之前是使用 callback
 ReactDOMHydrationRoot.prototype.unmount = ReactDOMRoot.prototype.unmount =
   // $FlowFixMe[missing-this-annot]
   function () {
@@ -128,6 +132,7 @@ ReactDOMHydrationRoot.prototype.unmount = ReactDOMRoot.prototype.unmount =
     }
     const root = this._internalRoot;
     if (root !== null) {
+      // 卸載
       this._internalRoot = null;
       const container = root.containerInfo;
       if (__DEV__) {
@@ -139,9 +144,15 @@ ReactDOMHydrationRoot.prototype.unmount = ReactDOMRoot.prototype.unmount =
           );
         }
       }
+      // ! flushSync 允許你強制 React 在提供的回調函式內同步刷新任何更新
+      // ! 這將確保 DOM 立即更新
+      // ! https://react.dev.org.tw/reference/react-dom/flushSync
       flushSync(() => {
+        // 卸載也一樣調用 updateContainer
+        // 沒有 children，第一個參數是 null
         updateContainer(null, root, null, null);
       });
+      // 取消 DOM Node 上的標記
       unmarkContainerAsRoot(container);
     }
   };
@@ -221,6 +232,16 @@ export function createRoot(container, options) {
   // rootFiber.stateNode = FiberRoot;
   const root = createContainer(
     container,
+    /**
+     * 放好是 concurrent，
+     * 在 createHostRootFiber 會根據這個 tag 指定模式
+     * 在 updateContainer 中，requestUpdateLane 會依照
+     * 是否是過度更新 或是 是內部更新 （比如 flushSync | setState
+     * 或是外部的更新 （比如 根據事件
+     *
+     * root.render(<App/>);
+     * 是從外部發起的，所以調用
+     */
     ConcurrentRoot,
     null,
     isStrictMode,

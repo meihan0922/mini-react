@@ -194,9 +194,11 @@ const classComponentUpdater = {
   isMounted,
   // $FlowFixMe[missing-local-annot]
   enqueueSetState(inst, payload, callback) {
+    // ! 獲取 current 和 lane
     const fiber = getInstance(inst);
     const lane = requestUpdateLane(fiber);
 
+    // ! 創建 Update
     const update = createUpdate(lane);
     update.payload = payload;
     if (callback !== undefined && callback !== null) {
@@ -206,9 +208,12 @@ const classComponentUpdater = {
       update.callback = callback;
     }
 
+    // ! update 入隊 updateQueue 中，
     const root = enqueueUpdate(fiber, update, lane);
     if (root !== null) {
+      // ! 調度更新
       scheduleUpdateOnFiber(root, fiber, lane);
+      // ! 處理 transition，非緊急更新
       entangleTransitions(root, fiber, lane);
     }
 
@@ -225,10 +230,13 @@ const classComponentUpdater = {
       markStateUpdateScheduled(fiber, lane);
     }
   },
+
   enqueueReplaceState(inst, payload, callback) {
+    // ! 獲取 current 和 lane
     const fiber = getInstance(inst);
     const lane = requestUpdateLane(fiber);
 
+    // ! 創建 Update
     const update = createUpdate(lane);
     update.tag = ReplaceState;
     update.payload = payload;
@@ -240,9 +248,12 @@ const classComponentUpdater = {
       update.callback = callback;
     }
 
+    // ! update 入隊 updateQueue 中，
     const root = enqueueUpdate(fiber, update, lane);
     if (root !== null) {
+      // ! 調度更新
       scheduleUpdateOnFiber(root, fiber, lane);
+      // ! 處理 transition，非緊急更新
       entangleTransitions(root, fiber, lane);
     }
 
@@ -261,9 +272,11 @@ const classComponentUpdater = {
   },
   // $FlowFixMe[missing-local-annot]
   enqueueForceUpdate(inst, callback) {
+    // ! 獲取 current 和 lane
     const fiber = getInstance(inst);
     const lane = requestUpdateLane(fiber);
 
+    // ! 創建 Update
     const update = createUpdate(lane);
     update.tag = ForceUpdate;
 
@@ -274,9 +287,12 @@ const classComponentUpdater = {
       update.callback = callback;
     }
 
+    // ! update 入隊 updateQueue 中，
     const root = enqueueUpdate(fiber, update, lane);
     if (root !== null) {
+      // ! 調度更新
       scheduleUpdateOnFiber(root, fiber, lane);
+      // ! 處理 transition，非緊急更新
       entangleTransitions(root, fiber, lane);
     }
 

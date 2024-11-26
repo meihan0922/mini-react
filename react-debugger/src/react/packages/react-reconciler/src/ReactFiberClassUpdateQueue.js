@@ -123,6 +123,7 @@ import { setIsStrictModeForDevtools } from "./ReactFiberDevToolsHook";
 
 import assign from "shared/assign";
 
+// 初次渲染
 export const UpdateState = 0;
 export const ReplaceState = 1;
 export const ForceUpdate = 2;
@@ -144,20 +145,32 @@ if (__DEV__) {
   };
 }
 
-// 初始化 `fiber.updateQueue`，在 beginWork 階段，updateHostRoot 中使用 processUpdateQueue 再具體賦值
+// 初始化 fiber.updateQueue，在初次渲染 createRoot 和類組件初次掛載 mountClassInstance 的時候都會調用
+// 在 beginWork 階段，updateHostRoot 中使用 processUpdateQueue 再具體賦值
 export function initializeUpdateQueue(fiber) {
+  console.log(
+    "%c [ initializeUpdateQueue ]: ",
+    "color: #fff;background: #a0a; font-size: 13px;",
+    ""
+  );
+  /**
+   * `BaseUpdate`: 每次調度時都會判斷當前任務是否有足夠的優先級來執行，
+   * 如果優先級不夠，就要重新儲存回鏈表中，下次渲染時重新調度，
+   * 所以在新一次的調度時，需要優先處理遺留的任務，再開始新的任務
+   */
   const queue = {
     // 基本狀態，比方類組件初次掛載更新存初始狀態、頁面的初次渲染，root掛載就是存element
     baseState: fiber.memoizedState,
-    // 單鏈表的解構 會一路指向 lastBaseUpdate
+    // ! 單鏈表的結構，會一路指向 lastBaseUpdate
     firstBaseUpdate: null,
     // 紀錄尾節點，一般來說是不用紀錄尾節點的，只是為了快速比較兩個單鏈表，用尾節點比較
     lastBaseUpdate: null,
     // 新得到的 update 會放在此，處理完後，會轉移到 BaseUpdate 上
     shared: {
-      pending: null, // 正在掛載的更新，單向循環鏈表
-      lanes: NoLanes, // Lanes
+      pending: null, // ! 單向循環鏈表，正在掛載的更新
+      lanes: NoLanes, // ! Lanes，整個 pending 的 merge
       /**
+       * 先跳過
        * 如果類組件是 Activity(以前叫做offScreen)的後代組件，
        * 需要延遲執行期 setState 的 callback，
        * 這裡只是先暫時收集，commit 階段提交，
@@ -186,17 +199,33 @@ export function cloneUpdateQueue(current, workInProgress) {
 }
 
 export function createUpdate(lane) {
+  console.log(
+    "%c [ createUpdate ]: ",
+    "color: #fff; background: #bf990f; font-size: 13px;",
+    ""
+  );
   const update = {
+    /**
+     * Lane
+     */
     lane,
+    /**
+     * 1 | 2 | 3 | 4
+     */
     tag: UpdateState,
-    payload: null,
-    callback: null,
-    next: null,
+    payload: null, // 像是 setState 會有參數，forceUpdate 就沒有
+    callback: null, // 以前 render 可以加上 callback
+    next: null, // Update<State>
   };
   return update;
 }
 
 export function enqueueUpdate(fiber, update, lane) {
+  console.log(
+    "%c [ updateContainer enqueueUpdate ]: ",
+    "color: #fff; background: #2c9f; font-size: 13px;",
+    ""
+  );
   const updateQueue = fiber.updateQueue;
   if (updateQueue === null) {
     // Only occurs if the fiber has been unmounted.
@@ -221,6 +250,7 @@ export function enqueueUpdate(fiber, update, lane) {
     }
   }
 
+  // 類組件舊的生命週期相關的 update，不再展開說明
   if (isUnsafeClassRenderPhaseUpdate(fiber)) {
     // This is an unsafe render phase update. Add directly to the update
     // queue so we can process it immediately during the current render.
@@ -240,6 +270,7 @@ export function enqueueUpdate(fiber, update, lane) {
     // currently renderings (a pattern that is accompanied by a warning).
     return unsafe_markUpdateLaneFromFiberToRoot(fiber, lane);
   } else {
+    // ! 實際是走到這裡
     return enqueueConcurrentClassUpdate(fiber, sharedQueue, update, lane);
   }
 }
@@ -433,54 +464,55 @@ function getStateFromUpdate(
   return prevState;
 }
 
+// ! 處理pending update，把他們轉移到 baseQueue，計算出最終的 state
 export function processUpdateQueue(
   workInProgress,
-  props,
-  instance,
+  props, // 新的 props
+  instance, // 實例，給類組件
   renderLanes
 ) {
-  // console.log(
-  //   "%cprocessUpdateQueue[436]",
-  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
-  // );
-  // console.log("處理pending update，把他們轉移到 baseQueue");
-  // console.log(
-  //   "pending update是單向循環鏈表，firstBaseUpdate, lastBaseUpdate 不是"
-  // );
+  console.log(
+    "%c [ processUpdateQueue ]: ",
+    "color: #bf2c9f; background: pink; font-size: 13px;",
+    ""
+  );
+
   // This is always non-null on a ClassComponent or HostRoot
   const queue = workInProgress.updateQueue;
-
   hasForceUpdate = false;
 
   if (__DEV__) {
     currentlyProcessingQueue = queue.shared;
   }
 
-  // 獲取上次還沒渲染的隊列
+  // ! pending update是單向循環鏈表，firstBaseUpdate, lastBaseUpdate 不是
   let firstBaseUpdate = queue.firstBaseUpdate;
   let lastBaseUpdate = queue.lastBaseUpdate;
 
   // Check if there are pending updates. If so, transfer them to the base queue.
-  // ! 獲取當前的隊列
+  // ! 檢查是否有 pending update，如果有，就轉移到 baseQueue 上
+  // queue.shared.pending; 只有紀錄尾節點
   let pendingQueue = queue.shared.pending;
   if (pendingQueue !== null) {
     queue.shared.pending = null;
 
     // The pending queue is circular. Disconnect the pointer between first
     // and last so that it's non-circular.
+    // firstBaseUpdate -> ... -> lastBaseUpdate
     const lastPendingUpdate = pendingQueue;
     const firstPendingUpdate = lastPendingUpdate.next;
     // ! 斷開循環鏈表
     lastPendingUpdate.next = null;
     // Append pending updates to base queue
-    // 如果尾隊列是空，表示整個隊列都是空的，把新的當前隊列塞入
+    // 如果尾隊列是空，表示整個隊列都是空的
     if (lastBaseUpdate === null) {
+      // firstPendingUpdate 就是頭節點 firstBaseUpdate
       firstBaseUpdate = firstPendingUpdate;
     } else {
-      // 把新的隊列放入尾節點的後面，拼接起來
+      // 否則往尾節點繼續添加 firstPendingUpdate
       lastBaseUpdate.next = firstPendingUpdate;
     }
-    // 指向到最末端
+    // 更新尾節點
     lastBaseUpdate = lastPendingUpdate;
 
     // If there's a current queue, and it's different from the base queue, then
@@ -489,9 +521,11 @@ export function processUpdateQueue(
     // lists and take advantage of structural sharing.
     // TODO: Pass `current` as argument
     const current = workInProgress.alternate;
-    // 如果兩棵樹對應的節點已經存在的話
+    // 如果有 current queue，並且和 base queue不同
+    // 那麼也需要把更新轉移到那個 queue 上
     if (current !== null) {
       // This is always non-null on a ClassComponent or HostRoot
+      // 類組件和 HostRoot 的 updateQueue 都初始化過，所以不會是 null
       const currentQueue = current.updateQueue;
       const currentLastBaseUpdate = currentQueue.lastBaseUpdate;
       // 如果當前的樹的更新鏈表最後的節點比對 新的樹的尾節點 不一樣，則將新的鏈表拼接到當前的樹中
@@ -505,8 +539,23 @@ export function processUpdateQueue(
       }
     }
   }
+  // 讓 workInProgress 和 current 的 updateQueue 一致
 
   // These values may change as we process the queue.
+  // ! 接下來要遍歷 queue，根據這些 update 計算出最後的結果
+  /**
+   * ex:
+   * root.render(<ClassComponent/>);
+   * root.render(jsx);
+   * 最後結果是 jsx，
+   *
+   * 或是
+   * this.setState({count: this.state.count + 1})
+   * this.setState({count: this.state.count + 2})
+   * 最後結果必須要是 +2
+   *
+   * 所有的 update 都在
+   */
   if (firstBaseUpdate !== null) {
     // Iterate through the list of updates to compute the result.
     let newState = queue.baseState;
@@ -519,8 +568,9 @@ export function processUpdateQueue(
     let newLastBaseUpdate = null;
 
     let update = firstBaseUpdate;
-    // 鏈表的循環處理
+    // ! 鏈表的循環處理
     do {
+      // !!-------略過此段start----- OffscreenLane還沒完成
       // An extra OffscreenLane bit is added to updates that were made to
       // a hidden tree, so that we can distinguish them from updates that were
       // already there when the tree was hidden.
@@ -548,9 +598,10 @@ export function processUpdateQueue(
 
           next: null,
         };
+
         if (newLastBaseUpdate === null) {
           newFirstBaseUpdate = newLastBaseUpdate = clone;
-          // 有 update 延遲了，把 state 保存起來
+          // 有 update 延遲了，把 計算好的 newState 保存起來
           newBaseState = newState;
         } else {
           newLastBaseUpdate = newLastBaseUpdate.next = clone;
@@ -560,7 +611,7 @@ export function processUpdateQueue(
         newLanes = mergeLanes(newLanes, updateLane);
       } else {
         // This update does have sufficient priority.
-
+        // 滿足更新的條件
         if (newLastBaseUpdate !== null) {
           // 如果前面有 update 被延遲了，後面所有任務都必須進入到被延遲的隊列中
           const clone = {
@@ -580,9 +631,11 @@ export function processUpdateQueue(
           };
           newLastBaseUpdate = newLastBaseUpdate.next = clone;
         }
-
+        // !! -------略過此段end-----
+        // !!----走到此-----
         // console.log("遍歷 queue，根據update計算出最後結果newState");
         // Process this update.
+        // 因為 ClassComponent state 可以是函式，所以要計算
         newState = getStateFromUpdate(
           workInProgress,
           queue,
@@ -607,13 +660,16 @@ export function processUpdateQueue(
         }
       }
       // $FlowFixMe[incompatible-type] we bail out when we get a null
+      // 下一個 update，在 baseQueue 上
       update = update.next;
       if (update === null) {
+        // ! 已經到達尾節點，所有 update 都被處理完畢，暫停循環
         pendingQueue = queue.shared.pending;
         if (pendingQueue === null) {
           break;
         } else {
-          // 當前的 queue 處理完後，queue.shared.pending可能會有新的更新，如果有就把新的放進來繼續處理
+          // ! 當前的 queue 處理完後，queue.shared.pending 可能會有新的更新
+          // ! 如果有就把新的放進來繼續處理
           // An update was scheduled from inside a reducer. Add the new
           // pending updates to the end of the list and keep processing.
           const lastPendingUpdate = pendingQueue;
@@ -632,12 +688,15 @@ export function processUpdateQueue(
       newBaseState = newState;
     }
 
+    // 保存 newState
     queue.baseState = newBaseState;
     // 保存延遲的 update
     queue.firstBaseUpdate = newFirstBaseUpdate;
     queue.lastBaseUpdate = newLastBaseUpdate;
 
     if (firstBaseUpdate === null) {
+      // ! 當多個 transitions 在同個 queue 中時，只允許最近的一個完成，不應該顯示中間的
+      // ! 當 queue 是空的，將 queue.lanes 設置為 0
       // `queue.lanes` is used for entangling transitions. We can set it back to
       // zero once the queue is empty.
       queue.shared.lanes = NoLanes;
@@ -650,9 +709,10 @@ export function processUpdateQueue(
     // dealt with the props. Context in components that specify
     // shouldComponentUpdate is tricky; but we'll have to account for
     // that regardless.
+    // 把跳過的 update 的 lanes 記錄下來
     markSkippedUpdateLanes(newLanes);
     workInProgress.lanes = newLanes;
-    // console.log("把newState掛到workInProgress.memoizedState");
+    // ! 把 newState 掛到 workInProgress.memoizedState
     workInProgress.memoizedState = newState;
   }
 

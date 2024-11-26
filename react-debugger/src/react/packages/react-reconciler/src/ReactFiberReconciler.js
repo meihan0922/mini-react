@@ -223,6 +223,11 @@ export function createContainer(
   onRecoverableError,
   transitionCallbacks
 ) {
+  console.log(
+    "%c [ createContainer ]: ",
+    "color: #000; background: orange; font-size: 13px;",
+    ""
+  );
   const hydrate = false;
   const initialChildren = null;
   return createFiberRoot(
@@ -286,43 +291,45 @@ export function createHydrationContainer(
   return root;
 }
 /**
- * 把 element 渲染到 container 中
- * @param {*} element
- * @param {*} container
+ * ! 把 element 渲染到 container 中
+ * @param {*} element: ReactNodeList
+ * @param {*} container: 指向 FiberRootNode
  * @param {*} parentComponent: 已過時，為了老代碼保留
  * @param {*} callback: 已過時，為了老代碼保留
  * @returns
  */
 export function updateContainer(element, container, parentComponent, callback) {
   console.log(
-    "%cupdateContainer[295]",
-    "color: #FFFFFF; font-size: 14px; background: #333333;"
-  );
-  console.log(
-    "element, container, parentComponent, callback",
-    element,
-    container,
-    parentComponent,
-    callback
+    "%c [ updateContainer ]: ",
+    "color: #fff; background: red; font-size: 13px;",
+    ""
   );
   // outputs: a Vegas style super shiny string
 
   if (__DEV__) {
     onScheduleRoot(container, element);
   }
-  // rootFiber
+  // ! FiberRootNode.current -> HostRootFiber
   const current = container.current;
-  console.log("current", current);
-  // 標示任務的優先級，可以理解為表示 update 的優先級的一種機制，每個 update 都會被分配一個或多個 lane，以確定其在更新隊列中的優先順序
-  // 獲取本次的update對應的優先級
-  console.log("獲取本次的update對應的優先級");
+
+  /**
+   * ! 獲取本次的update對應的優先級：
+   * 標示任務的優先級，可以理解為表示 update 的優先級的一種機制，
+   * 每個 update 都會被分配一個或多個 lane，
+   * 以確定其在更新隊列中的優先順序。
+   *
+   * 頁面初次渲染，defaultLane 32
+   */
   const lane = requestUpdateLane(current);
-  console.log("requestUpdateLane lane", lane);
 
   if (enableSchedulingProfiler) {
     markRenderScheduled(lane);
   }
 
+  /**
+   * parentComponent 為 null，此處代碼只是返回一個空對象
+   * 此處用於兼容老代碼
+   */
   const context = getContextForSubtree(parentComponent);
   if (container.context === null) {
     container.context = context;
@@ -348,22 +355,27 @@ export function updateContainer(element, container, parentComponent, callback) {
   }
 
   /**
-   * 創建更新對象
+   * ! 創建更新對象
+   *
+   * 類組件setState, forceUpdate 和 createRoot(domNode).render() 都會產生的update
    * update: {
    *    lane: any;
-   *    tag: number; // 更新類型
+   *    tag: number; // 更新類型 0 | 1 | 2 | 3
    *    payload: any;
    *    callback: any;
    *    next: any; // 下一個更新
    * }
+   * 會先儲存起來，一起處理，再一次commit
+   * 比方去釣魚，一個update就是一隻魚，會搜集起來放進籃子中
+   * 再一起賣掉
    */
   const update = createUpdate(lane);
   // Caution: React DevTools currently depends on this property
   // being called "element".
   update.payload = { element };
-  console.log("創建Update對象，子節點變成 update 裡的 payload.element了");
+  // console.log("創建Update對象，子節點變成 update 裡的 payload.element了");
 
-  // 從React18開始，render不再傳入callback了，即這裡的if就沒有作用了
+  // ! 從 React18 開始，render 不再傳入 callback 了，即這裡的if就沒有作用了
   callback = callback === undefined ? null : callback;
   if (callback !== null) {
     if (__DEV__) {
@@ -377,7 +389,25 @@ export function updateContainer(element, container, parentComponent, callback) {
     }
     update.callback = callback;
   }
-  // 沒有立刻就把 update 放到 fiber 上，可能正在渲染中，收到來自併發事件的更新，會等到渲染終止或是暫停，再添加到 fiber 上
+  /**
+   * ! 沒有立刻把 update 放到 fiber 上面，先放到 concurrentQueues，
+   * 如果渲染正在進行中，並且收到來自併發事件的更新，
+   * 就會等到當前的渲染結束，（不論是完成或是被中斷），
+   *
+   * 如果 setState 2次 -> 2個update，
+   * 重複2次(createUpdate -> enqueueUpdate -> scheduleUpdateOnFiber)
+   * 將update推送到這個陣列中，這樣以後就可以訪問 queue, fiber, update 等等
+   *
+   *
+   * 再在 render 後、workLoopSync 前
+   * finishQueueingConcurrentUpdates 一次處理，將其添加到 queue.shared.pending; 隊列當中
+   *
+   * workLoopSync
+   *  -> beginWork
+   *    -> updateHostRoot | updateClassComponent（函式組件和 hook 相關，先略過
+   *      -> 如果需要處理 fiber 上的 updateQueue 就會調用 processUpdateQueue
+   *
+   */
   const root = enqueueUpdate(current, update, lane);
   if (root !== null) {
     scheduleUpdateOnFiber(root, current, lane);

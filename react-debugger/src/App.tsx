@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Component } from "react";
 import { useState } from "react";
 import * as ReactDOM from "react-dom/client";
 
@@ -12,11 +12,31 @@ function Count({ initCount }: { initCount: number }) {
   );
 }
 
+class TestFn extends Component {
+  state = { count: 0 };
+
+  render() {
+    return (
+      <div>
+        <button
+          onClick={() => {
+            this.setState({ count: this.state.count + 1 });
+            this.setState({ count: this.state.count + 2 });
+          }}
+        >
+          {this.state.count}
+        </button>
+      </div>
+    );
+  }
+}
+
 function App() {
   return (
     <div>
-      <Count initCount={1} />
-      <Count initCount={12} />
+      <TestFn />
+      {/* <Count initCount={1} />
+      <Count initCount={12} /> */}
     </div>
   );
 }

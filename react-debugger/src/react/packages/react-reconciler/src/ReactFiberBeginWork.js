@@ -3842,10 +3842,11 @@ function attemptEarlyBailoutIfNoScheduledUpdate(
 }
 
 function beginWork(current, workInProgress, renderLanes) {
-  // console.log(
-  //   "%cbeginWork[2219]",
-  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
-  // );
+  console.log(
+    "%c [ beginWork ]: ",
+    "color: #bf2c9f; background: pink; font-size: 13px;",
+    ""
+  );
   if (__DEV__) {
     if (workInProgress._debugNeedsRemount && current !== null) {
       // This will restart the begin phase with a new fiber.

@@ -425,6 +425,7 @@ export function createHostRootFiber(
   concurrentUpdatesByDefaultOverride
 ) {
   let mode;
+  // 指定模式
   if (tag === ConcurrentRoot) {
     mode = ConcurrentMode;
     if (isStrictMode === true || createRootStrictEffectsByDefault) {
