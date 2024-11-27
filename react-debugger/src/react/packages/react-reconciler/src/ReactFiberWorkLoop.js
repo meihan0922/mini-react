@@ -657,6 +657,13 @@ function requestRetryLane(fiber) {
   return claimNextRetryLane();
 }
 
+/**
+ * ! 頁面初次渲染、類組件 setState/forceUpdate 、 函式組件 setState 都會調用
+ * ! 從根節點開始更新，但做過優化，具體的更新是從子節點
+ * @param {*} root : FiberRoot
+ * @param {*} fiber :Fiber
+ * @param {*} lane :Lane
+ */
 export function scheduleUpdateOnFiber(root, fiber, lane) {
   console.log(
     "%c [ scheduleUpdateOnFiber ]: ",
@@ -754,6 +761,7 @@ export function scheduleUpdateOnFiber(root, fiber, lane) {
       }
     }
 
+    // 頁面初次渲染時，此時 workInProgressRoot 還是 null
     if (root === workInProgressRoot) {
       // Received an update to a tree that's in the middle of rendering. Mark
       // that there was an interleaved update work on this root.
@@ -774,7 +782,9 @@ export function scheduleUpdateOnFiber(root, fiber, lane) {
       }
     }
 
+    // ! 確保調度開始了
     ensureRootIsScheduled(root);
+
     if (
       lane === SyncLane &&
       executionContext === NoContext &&

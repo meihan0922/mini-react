@@ -79,15 +79,16 @@ let isFlushingWork = false;
 
 let currentEventTransitionLane = NoLane;
 
+// ! 註冊調度任務，Scheduler調度，構造 fiber
+// ! 是否需要註冊新的調度，然後註冊一個新的調度來執行我們的Fiber生成邏輯
 export function ensureRootIsScheduled(root) {
-  // console.log(
-  //   "%censureRootIsScheduled[80]",
-  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
-  // );
-  // console.log("註冊調度任務，Scheduler調度，構造 fiber");
-  // console.log(
-  //   "是否需要註冊新的調度，然後註冊一個新的調度來執行我們的Fiber生成邏輯"
-  // );
+  console.log(
+    "%c [ ensureRootIsScheduled ]: ",
+    "color: #FFFFFF; background: #333333; font-size: 13px;",
+    ""
+  );
+
+  // 這個函式執行了2次
   // This function is called whenever a root receives an update. It does two
   // things 1) it ensures the root is in the root schedule, and 2) it ensures
   // there's a pending microtask to process the root schedule.
@@ -102,6 +103,7 @@ export function ensureRootIsScheduled(root) {
     if (lastScheduledRoot === null) {
       firstScheduledRoot = lastScheduledRoot = root;
     } else {
+      // 多個根節點
       lastScheduledRoot.next = root;
       lastScheduledRoot = root;
     }
@@ -110,12 +112,15 @@ export function ensureRootIsScheduled(root) {
   // Any time a root received an update, we set this to true until the next time
   // we process the schedule. If it's false, then we can quickly exit flushSync
   // without consulting the schedule.
+  // 每當 root 接收到 update，將其設成 true，直到下次調度為止。
+  // 如果為 false 就可以在不查看調度的情況下，快速退出 flushSync
   mightHavePendingSyncWork = true;
   // console.log(
   //   "產生兩類調度任務, 一個是SyncWork，另一個是ConcurrentWork，他們分別對應同步任務和可中斷任務"
   // );
   // At the end of the current event, go through each of the roots and ensure
   // there's a task scheduled for each one at the correct priority.
+  // 在當前事件結束時，逐個檢查每個 root ，確保每個 root 安排了正確的優先級任務
   if (__DEV__ && ReactCurrentActQueue.current !== null) {
     // We're inside an `act` scope.
     if (!didScheduleMicrotask_act) {
@@ -124,6 +129,7 @@ export function ensureRootIsScheduled(root) {
     }
   } else {
     if (!didScheduleMicrotask) {
+      // ! 防止重複的微任務被調度
       didScheduleMicrotask = true;
       scheduleImmediateTask(processRootScheduleInMicrotask);
     }
@@ -138,6 +144,7 @@ export function ensureRootIsScheduled(root) {
     scheduleTaskForRootDuringMicrotask(root, now());
   }
 
+  //
   if (
     __DEV__ &&
     ReactCurrentActQueue.isBatchingLegacy &&
@@ -239,6 +246,7 @@ function throwError(error) {
   throw error;
 }
 
+// ! 在微任務中調用
 function processRootScheduleInMicrotask() {
   // This function is always called inside a microtask. It should never be
   // called synchronously.
@@ -248,6 +256,7 @@ function processRootScheduleInMicrotask() {
   }
 
   // We'll recompute this as we iterate through all the roots and schedule them.
+  //遍歷所有根並安排
   mightHavePendingSyncWork = false;
 
   const currentTime = now();
@@ -317,12 +326,17 @@ function scheduleTaskForRootDuringMicrotask(root, currentTime) {
 
   // Check if any lanes are being starved by other work. If so, mark them as
   // expired so we know to work on those next.
-  // console.log("把優先級低但是過期的任務標註為高優先級");
+  // ! 把優先級低但是過期的任務標註為高優先級
   markStarvedLanesAsExpired(root, currentTime);
 
   // Determine the next lanes to work on, and their priority.
   const workInProgressRoot = getWorkInProgressRoot();
   const workInProgressRootRenderLanes = getWorkInProgressRootRenderLanes();
+  /**
+   * 调用getNextLanes获取下一个车道
+   * 如果没有下一个车道了,即调用结果是 NoLanes, 则退出
+   * 退出前执行 root.callbackNode = null和root.callbackPriority = NoLane
+   */
   const nextLanes = getNextLanes(
     root,
     root === workInProgressRoot ? workInProgressRootRenderLanes : NoLanes
@@ -384,6 +398,7 @@ function scheduleTaskForRootDuringMicrotask(root, currentTime) {
     }
 
     let schedulerPriorityLevel;
+    // 將 lanes 轉換為事件的優先級調用 scheduler(轉換成scheduler可辨識的優先級)
     switch (lanesToEventPriority(nextLanes)) {
       case DiscreteEventPriority:
         schedulerPriorityLevel = ImmediateSchedulerPriority;
@@ -469,8 +484,11 @@ function scheduleImmediateTask(cb) {
 
   // TODO: Can we land supportsMicrotasks? Which environments don't support it?
   // Alternatively, can we move this check to the host config?
+  // ! 當前環境支持微任務嗎
   if (supportsMicrotasks) {
+    // ! queueMicrotask
     scheduleMicrotask(() => {
+      // 處理 Safari 的 bug
       // In Safari, appending an iframe forces microtasks to run.
       // https://github.com/facebook/react/issues/22459
       // We don't support running callbacks in the middle of render

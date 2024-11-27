@@ -1,5 +1,7 @@
 - [mini-react](#mini-react)
+  - [初步創建框架](#初步創建框架)
   - [jsx](#jsx)
+    - [模擬 jsx, jsxDev](#模擬-jsx-jsxdev)
     - [🌟 知識點 - $$typeof 就是 React 內建的防範 XSS 攻擊功能](#-知識點---typeof-就是-react-內建的防範-xss-攻擊功能)
   - [fiber](#fiber)
   - [創建 Fiber 和 FiberRoot](#創建-fiber-和-fiberroot)
@@ -97,11 +99,38 @@
 
 ---
 
-react 中的階段：
+- react 中的階段：
 
-- triggering: a render （把客人的點單分發到廚房)
-- rendering: the component beginWork, completeWork (準備訂單)
-- commiting: to the DOM (將菜放在桌上)
+  - triggering: a render （把客人的點單分發到廚房)
+  - rendering: the component beginWork, completeWork (準備訂單)
+  - commiting: to the DOM (將菜放在桌上)
+
+- react 中的主要的 packages：
+  - react：核心 Api 所在，如 React.createElement、React.Component
+  - react-reconclier：協調器，react 核心邏輯，用來建構 fiber
+  - scheduler：調度器，和網頁環境相關
+  - react-dom：瀏覽器環境
+  - shared：共享的輔助方法
+  - react-dom-bindings: 事件處理
+
+## 初步創建框架
+
+基於 mono-repo 使用 pnpm，管理框架。
+資料夾結構如下
+
+- react-debugger：把 react v18.2 搬入，並使用 vite 運行，可以在源碼中加入 debugger 和 console.log 看清流程。
+- packages: mini-react 實現，主要簡單的做六個包
+  - react
+  - react-dom
+  - react-dom-bindings
+  - react-reconclier
+  - scheduler
+  - shared
+- examples: 使用 mini-react 實踐使用場景，邊開發邊除錯。
+
+- 指令
+  - `pnpm run dev` - 用來開發 mini-react
+  - `pnpm run dev-debugger` - 用來看源碼
 
 ## jsx
 
@@ -181,7 +210,65 @@ _jsxs(
 ```
 
 > [!TIP] 源碼筆記
-> react-debugger/src/react/packages/react/src/jsx/ReactJSXElement.js
+> [react-debugger/src/react/packages/react/src/jsx/ReactJSXElement.js](./react-debugger/src/react/packages/react/src/jsx/ReactJSXElement.js)
+
+### 模擬 jsx, jsxDev
+
+沒有在 examples 做使用，只是模擬
+
+> 手寫：packages/react/src/jsx.ts
+
+```ts
+import { ReactElement } from "@mono/shared/ReactTypes";
+import { REACT_ELEMENT_TYPE } from "@mono/shared/ReactSymbols";
+
+const ReactElement = function (type, key, ref, props) {
+  const element: ReactElement = {
+    $$typeof: REACT_ELEMENT_TYPE,
+    type,
+    key,
+    ref,
+    props,
+  };
+  return element;
+};
+
+export const jsx: ReactElement = (type, config, ...children) => {
+  let key: string | null = null;
+  let ref = null;
+
+  const props: any = {};
+
+  for (const prop in config) {
+    const val = config[prop];
+    if (prop === "key") {
+      if (val !== undefined) {
+        key = "" + val;
+      }
+      continue;
+    }
+    if (prop === "ref") {
+      if (val !== undefined) {
+        ref = val;
+      }
+      continue;
+    }
+    if (Object.hasOwn.call(config, prop)) {
+      props[prop] = val;
+    }
+
+    const childrenLength = children.length;
+    if (childrenLength) {
+      if (childrenLength === 1) {
+        props.children = children[0];
+      } else {
+        props.children = children;
+      }
+    }
+  }
+  return ReactElement(type, key, ref, props);
+};
+```
 
 ### 🌟 知識點 - $$typeof 就是 React 內建的防範 XSS 攻擊功能
 
@@ -224,8 +311,6 @@ console.log(Symbol("foo") === Symbol("foo")); // false
 > [!NOTE]
 > 補充 XSS: 主要是插入惡意腳本、到網頁中，當用戶加載時就會在他們的瀏覽器執行。主要類型有存儲型（把惡意腳本存在服務端，請求時加載）、反射型（在請求中插入惡意的腳本，在服務器端回應時，執行，通常會搭配表單提交或通過 url 實現）、DOM 型（直接改變客戶端 JS 代碼，使得惡意的腳本被執行）。防範方式有：所有提交都須經過驗證、在將用戶輸入顯示到網頁上之前，對數據進行編碼，防止瀏覽器將其解釋為腳本、使用現代框架 React 等等。
 
----
-
 ## fiber
 
 再開始進入我們熟悉的 createRoot 的入口函式之前，先來了解 fiber 是什麼？
@@ -238,8 +323,7 @@ react element 上，不同的標籤，生成不同屬性的 fiber。其他相關
 在新渲染時，會產生一個新的樹(workInProgress tree)，原先的樹會變成舊的樹(current tree)，fiber 之間如果是可以復用的話，會通過 alternate 指向彼此（後續再說）
 
 > [!TIP] 源碼筆記
-> react-debugger/src/react/packages/react-reconciler/src/ReactInternalTypes.js
-> react-debugger/src/react/packages/react-reconciler/src/ReactWorkTags.js
+> [react-debugger/src/react/packages/react-reconciler/src/ReactInternalTypes.js](./react-debugger/src/react/packages/react-reconciler/src/ReactInternalTypes.js) > [react-debugger/src/react/packages/react-reconciler/src/ReactWorkTags.js](./react-debugger/src/react/packages/react-reconciler/src/ReactWorkTags.js)
 
 手寫：複製型別到 src/ReactInternalTypes.js
 
@@ -671,7 +755,7 @@ export function createFiberRoot(
 react 的入口點
 
 > [!TIP] 源碼筆記
-> react-debugger/src/react/packages/react-dom/src/client/ReactDOMRoot.js
+> [react-debugger/src/react/packages/react-dom/src/client/ReactDOMRoot.js](./react-debugger/src/react/packages/react-dom/src/client/ReactDOMRoot.js)
 
 手寫： @mono/react-dom/src/client/ReactDOMRoot.ts
 
@@ -721,10 +805,9 @@ export default { createRoot };
 ### 2. 調用 render，根組件交給 react，react 內部調用 updateContainer，啟動調度
 
 > [!TIP] 源碼筆記
-> react-debugger/src/react/packages/react-reconciler/src/ReactFiberReconciler.js
+> [react-debugger/src/react/packages/react-reconciler/src/ReactFiberReconciler.js](./react-debugger/src/react/packages/react-reconciler/src/ReactFiberReconciler.js)
 >
-> react-debugger/src/react/packages/react-reconciler/src/ReactFiberRoot.js
-> [ClassComponent 和 HostRoot 的 UpdateQueue](./UpdateQueue.md)
+> [react-debugger/src/react/packages/react-reconciler/src/ReactFiberRoot.js](./react-debugger/src/react/packages/react-reconciler/src/ReactFiberRoot.js) > [ClassComponent 和 HostRoot 的 UpdateQueue](./UpdateQueue.md)
 
 手寫： @mono/react-reconciler/src/ReactFiberReconciler.ts
 
@@ -771,9 +854,17 @@ export function updateContainer(element: ReactNodeList, container: FiberRoot) {
 
 ## scheduleUpdateOnFiber 調度更新開始
 
-> @mono/react-reconciler/ReactFiberWorkLoop
+> [!TIP] 源碼筆記
+> [react-debugger/src/react/packages/react-reconciler/src/ReactFiberWorkLoop.js](./react-debugger/src/react/packages/react-reconciler/src/ReactFiberWorkLoop.js)
 
-在 `updateContainer()` 中調度 `scheduleUpdateOnFiber()`，這也是之後頁面觸發渲染都會執行的函式(頁面初次渲染、類組件 setState/forceUpdate、函數組件 setState)。會將指針指向正在處理的節點
+手寫： @mono/react-reconciler/ReactFiberWorkLoop
+
+在 `updateContainer()` 中調度 `scheduleUpdateOnFiber()`，這也是之後頁面觸發渲染都會執行的函式(頁面初次渲染、類組件 setState/forceUpdate、函數組件 setState)。會將指針指向正在處理的節點。
+他主要是負責
+
+1. 標記更新: 將更新任務加入調度隊列
+2. 確保高優先級的先執行
+3. 啟動調度
 
 ```ts
 import { Lane } from "./ReactFiberLane";
@@ -814,7 +905,7 @@ import { FiberRoot } from "./ReactInternalTypes";
 import { scheduleCallback, NormalPriority } from "@mono/scheduler";
 
 export function ensureRootIsScheduled(root: FiberRoot) {
-  // window 的方法，加入微任務，會去執行 scheduler 包中的調度，確保在當次瀏覽器工作循環執行
+  // ! window 的方法，加入微任務，會去執行 scheduler 包中的調度，確保在當次瀏覽器工作循環執行
   queueMicrotask(() => {
     scheduleTaskForRootDuringMicrotask(root);
   });
@@ -833,17 +924,28 @@ export function scheduleTaskForRootDuringMicrotask(root: FiberRoot) {
 
 ### react-reconciler workLoop
 
-`preformConcurrentWorkOnRoot` 被加入宏任務中，在這個時間切片當中，要處理 fiber 樹的創建。從此時正式進入 react-reconciler workLoop。每個 loop 處理單一的節點，之後的每次更新都會在此處理 fiber 新舊樹看是否要復用。
-現在是第一次渲染，小小簡介一下。
-reconciler 有分兩階段
+`preformConcurrentWorkOnRoot` 被加入宏任務中，在這個時間切片當中，要處理 fiber 樹的創建。
+先簡單介紹下 react-reconciler。
+從此開始進入 fiber 的創建，也就是建立虛擬 DOM。
 
-1. render: 構建 fiber 樹(VDOM)，核心就是調用 renderRootSync，又分為兩階段
-   1. beginWork: 按照 workInProgress tag，執行子節點的 fiber 創建
-      - 看有沒有要走 diff，走到 bailout
-      - 沒有子節點則停止，返回子節點（深度優先，一路執行 child)
-   2. completeUnitWork: 循環執行創建真實 DOM
-      - 把 workInProgress 轉移指針到同層級的兄弟節點，回到 beginWork，直到所有兄弟節點與其子節點都完成，這時指針轉移到父節點上，因為此時的父節點已經執行過 beginWork，不需要跳出 completeUnitWork 的迴圈，執行 DOM 創建之餘，把所有有 stateNode 的子節點（需要略過 Fragment、child === null）全部 appendAllChildren 到父節點 stateNode 中。以上 重複直到根節點。
-2. commit: VDOM -> DOM
+react-reconciler 是對 fiber 樹進行[深度優先遍歷(DFS)](./DFS.md)，
+主要做幾件事：
+
+1. 遍歷樹：首先訪問根節點，（初次渲染會依序創建子節點），依次訪問 child（第一個子節點），產生出兩棵樹，尚未更新到畫面的以及現存在內存當中的舊的樹。
+2. 比較新舊節點(DIFF)，打上不同的標記。
+3. 更新 fiber 節點的相關操作，比如狀態、屬性、生命週期等等，分配不同的優先級，依賴 scheduler 控制。
+4. 遞歸重複上述 2.3. 處理子節點。
+5. 後續交給協調層，將更新虛擬樹轉換為真實 DOM
+   > [可以看 react 工作流程的三層架構](./react%20工作流程.md)
+
+- reconciler 工作流程有分兩階段
+  1. render: 構建 fiber 樹(VDOM)，核心就是調用 renderRootSync，又分為兩階段
+     1. beginWork: 按照 workInProgress tag，執行子節點的 fiber 創建
+        - 看有沒有要走 diff，走到 bailout
+        - 沒有子節點則停止，返回子節點（深度優先，一路執行 child)
+     2. completeUnitWork: 循環執行創建真實 DOM
+        - 把 workInProgress 轉移指針到同層級的兄弟節點，回到 beginWork，直到所有兄弟節點與其子節點都完成，這時指針轉移到父節點上，因為此時的父節點已經執行過 beginWork，不需要跳出 completeUnitWork 的迴圈，執行 DOM 創建之餘，把所有有 stateNode 的子節點（需要略過 Fragment、child === null）全部 appendAllChildren 到父節點 stateNode 中。以上 重複直到根節點。
+  1. commit: VDOM -> DOM
 
 #### 先處理 beginWork
 

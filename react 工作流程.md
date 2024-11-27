@@ -341,7 +341,7 @@ Fiber 的引入就是為了讓渲染過程變成異步，將渲染拆分多塊�
 ### 源碼中的 Fiber
 
 > [!TIP] 源碼筆記
-> react-debugger/src/react/packages/react-reconciler/src/ReactInternalTypes.js
+> [react-debugger/src/react/packages/react-reconciler/src/ReactInternalTypes.js](./react-debugger/src/react/packages/react-reconciler/src/ReactInternalTypes.js)
 
 ## 用簡單的模擬協調過程
 

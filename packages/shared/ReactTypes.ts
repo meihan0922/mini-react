@@ -10,7 +10,7 @@ export type ReactElement = {
   ref: any;
   props: any;
   // ReactFiber
-  _owner: any;
+  _owner?: any;
 };
 
 export type ReactNode = ReactElement | ReactText | ReactFragment;

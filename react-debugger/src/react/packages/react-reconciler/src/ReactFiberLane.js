@@ -570,7 +570,7 @@ export function createLaneMap(initial) {
 }
 
 export function markRootUpdated(root, updateLane) {
-  // 或運算，把 updateLane 添加到 pendingLanes
+  // ! 或運算，把 updateLane 添加到 pendingLanes
   root.pendingLanes |= updateLane;
 
   // If there are any suspended transitions, it's possible this new update
@@ -585,6 +585,10 @@ export function markRootUpdated(root, updateLane) {
   // We don't do this if the incoming update is idle, because we never process
   // idle updates until after all the regular updates have finished; there's no
   // way it could unblock a transition.
+  /**
+   * 如果update是閒置的（延遲的），不會處理它，
+   * 因為會等所有正常的update完成後才會處理空閒更新
+   */
   if (updateLane !== IdleLane) {
     root.suspendedLanes = NoLanes;
     root.pingedLanes = NoLanes;
