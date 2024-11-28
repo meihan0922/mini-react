@@ -546,13 +546,13 @@ function commitBeforeMutationEffectsDeletion(deletion) {
     }
   }
 }
-
+// ! 不管是 useLayoutEffect 還是 useEffect 都調用了它，
 function commitHookEffectListUnmount(
   flags,
   finishedWork,
   nearestMountedAncestor
 ) {
-  const updateQueue = finishedWork.updateQueue;
+  const updateQueue = finishedWork.updateQueue; // effect 存在上面，單向循環鏈表
   const lastEffect = updateQueue !== null ? updateQueue.lastEffect : null;
   if (lastEffect !== null) {
     const firstEffect = lastEffect.next;
@@ -561,6 +561,7 @@ function commitHookEffectListUnmount(
       if ((effect.tag & flags) === flags) {
         // Unmount
         const inst = effect.inst;
+        // ! 找到 destroy 執行
         const destroy = inst.destroy;
         if (destroy !== undefined) {
           inst.destroy = undefined;
@@ -622,6 +623,7 @@ function commitHookEffectListMount(flags, finishedWork) {
           }
         }
         const inst = effect.inst;
+        // ! 執行的是 create
         const destroy = create();
         inst.destroy = destroy;
         if (__DEV__) {
@@ -2422,7 +2424,8 @@ export function commitMutationEffects(root, finishedWork, committedLanes) {
 function recursivelyTraverseMutationEffects(root, parentFiber, lanes) {
   // Deletions effects can be scheduled on any fiber type. They need to happen
   // before the children effects hae fired.
-  const deletions = parentFiber.deletions;
+  const deletions = parentFiber.deletions; // array || null
+  // * 有要刪除的節點，如果子節點是韓式或是類組件，要處理生命週期
   if (deletions !== null) {
     for (let i = 0; i < deletions.length; i++) {
       const childToDelete = deletions[i];
@@ -3280,6 +3283,7 @@ function recursivelyTraverseReappearLayoutEffects(
 }
 
 function commitHookPassiveMountEffects(finishedWork, hookFlags) {
+  // !
   if (shouldProfile(finishedWork)) {
     startPassiveEffectTimer();
     try {
@@ -3483,6 +3487,7 @@ function commitPassiveMountOnFiber(
     case FunctionComponent:
     case ForwardRef:
     case SimpleMemoComponent: {
+      // !
       recursivelyTraversePassiveMountEffects(
         finishedRoot,
         finishedWork,

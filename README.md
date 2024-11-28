@@ -991,7 +991,9 @@ react-reconciler 是對 fiber 樹進行[深度優先遍歷(DFS)](./DFS.md)，
       2. 將變化應用到 DOM 或其他目標
       3. 執行副作用，如 `componentDidMount`、`useEffect` 的 `cleanup` 和 `setup`
 
-- 詳見隔壁頁筆記：[源碼當中的 renderRootConcurrent 和 renderRootSync](./react%20工作流程.md)
+> [!TIP] 詳見隔壁頁筆記：
+> [源碼當中的 renderRootConcurrent 和 renderRootSync](./react%20工作流程.md)
+> [源碼當中的 commit 階段](./react%20工作流程.md)
 
 #### 先處理 beginWork
 

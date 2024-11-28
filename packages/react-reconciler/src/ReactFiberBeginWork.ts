@@ -192,6 +192,12 @@ function updateHostText() {
 // 根 fiber 節點，所需要做的只是，協調子節點
 function updateHostRoot(current: Fiber | null, workInProgress: Fiber) {
   const nextChildren = current?.memoizedState.element;
+  console.log(
+    "%c [ nextChildren ]: ",
+    "color: #bf2c9f; background: pink; font-size: 13px;",
+    nextChildren
+  );
+  debugger;
   reconcileChildren(current, workInProgress, nextChildren);
   // 如果是更新階段，走到此，表示整棵樹都要更新，
   // 協調子節點完成後，舊的子節點，更新成新的子節點
@@ -221,6 +227,11 @@ function reconcileChildren(
   workInProgress: Fiber,
   nextChildren: any
 ) {
+  console.log(
+    "%c [ current ]: ",
+    "color: #bf2c9f; background: pink; font-size: 13px;",
+    current
+  );
   // 初次渲染
   if (current === null) {
     workInProgress.child = mountChildFibers(workInProgress, null, nextChildren);

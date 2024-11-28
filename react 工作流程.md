@@ -627,6 +627,25 @@ function commitWork(currentFiber) {
 requestIdleCallback(workLoop, { timeout: 1000 });
 ```
 
+#### 在源碼中的 commit
+
+| 階段                    | 時機            | 主要任務                                                     | 特點                                              |
+| ----------------------- | --------------- | ------------------------------------------------------------ | ------------------------------------------------- |
+| commit(before mutation) | 在 DOM 更新之前 | 捕獲 DOM 之前的快照，準備 DOM 修改任務                       | 紀錄更新前狀態（如滾動前位置）不會對 DOM 作出修改 |
+| mutation                | 在 DOM 更新時   | 執行 DOM 增刪改，清理舊 Ref                                  | 會同步完成 DOM 的修改，可能會影響性能             |
+| Layout                  | 在 DOM 更新後   | 觸發佈局相關任務，例如 componentDidUpdate 和 useLayoutEffect | 已完成更新，可以安全的操作 DOM 或是測量佈局       |
+
+🌟 useEffect 不完全等於 componentDidMount 只能說是替代，是為什麼呢？
+
+| 特性           | componentDidMount  | useEffect          |
+| -------------- | ------------------ | ------------------ |
+| 執行階段       | commit-Layout      | commit 完成後      |
+| 執行方式       | 同步               | 異步               |
+| DOM 是否已更新 | 是，可同步操作 DOM | 是，可異步操作 DOM |
+| 是否阻塞渲染   | 是                 | 否                 |
+
+其實 `useLayoutEffect` 和 `componentDidMount` 執行時機比較接近，都在 DOM 更新完成后"同步"执行，可以直接操作 DOM。在瀏覽器繪製之前執行。
+
 ## 常提到的專有名詞 - 增量式渲染 (Incremental Rendering)、併發模式 (Concurrent Mode)
 
 ### 增量式渲染 (Incremental Rendering)

@@ -2762,9 +2762,8 @@ function commitRootImpl(
       // the previous render and commit if we throttle the commit
       // with setTimeout
       pendingPassiveTransitions = transitions;
-      // !!!!!! 異步處理 effect
+      // !!!!!! 1. 異步處理 passive effect
       scheduleCallback(NormalSchedulerPriority, () => {
-        debugger;
         flushPassiveEffects();
         // This render triggered passive effects: release the root cache pool
         // *after* passive effects fire to avoid freeing a cache pool that may
@@ -2795,6 +2794,7 @@ function commitRootImpl(
     setCurrentUpdatePriority(DiscreteEventPriority);
 
     const prevExecutionContext = executionContext;
+    //! 2. commit 階段
     executionContext |= CommitContext;
 
     // Reset this to null before calling lifecycles
@@ -2825,6 +2825,7 @@ function commitRootImpl(
     }
 
     // The next phase is the mutation phase, where we mutate the host tree.
+    // ! 3. mutation 階段(包含DOM 變更)
     commitMutationEffects(root, finishedWork, lanes);
 
     if (enableCreateEventHandleAPI) {
@@ -2851,6 +2852,8 @@ function commitRootImpl(
     if (enableSchedulingProfiler) {
       markLayoutEffectsStarted(lanes);
     }
+    // ! 4. layout 階段
+    // componentDidUpdate 的執行時機和 effect 明顯不同
     commitLayoutEffects(finishedWork, root, lanes);
     if (__DEV__) {
       if (enableDebugTracing) {
@@ -3087,7 +3090,7 @@ function releaseRootPooledCache(root, remainingLanes) {
 }
 
 export function flushPassiveEffects() {
-  debugger;
+  // debugger;
   // Returns whether passive effects were flushed.
   // TODO: Combine this check with the one in flushPassiveEFfectsImpl. We should
   // probably just combine the two functions. I believe they were only separate
@@ -3174,10 +3177,13 @@ function flushPassiveEffectsImpl() {
     markPassiveEffectsStarted(lanes);
   }
 
+  // ! commit 階段
   const prevExecutionContext = executionContext;
   executionContext |= CommitContext;
 
+  // ! 如果是更新階段，執行 cleanup 函式
   commitPassiveUnmountEffects(root.current);
+  // ! setup 函式
   commitPassiveMountEffects(root, root.current, lanes, transitions);
 
   // TODO: Move to commitPassiveMountEffects
