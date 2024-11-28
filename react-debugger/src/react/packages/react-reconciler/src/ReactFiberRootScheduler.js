@@ -250,18 +250,20 @@ function throwError(error) {
 function processRootScheduleInMicrotask() {
   // This function is always called inside a microtask. It should never be
   // called synchronously.
+  // ! 防止重複的微任務調度
   didScheduleMicrotask = false;
   if (__DEV__) {
     didScheduleMicrotask_act = false;
   }
 
   // We'll recompute this as we iterate through all the roots and schedule them.
-  //遍歷所有根並安排
+  // 遍歷所有根並安排
   mightHavePendingSyncWork = false;
 
   const currentTime = now();
 
   let prev = null;
+  // 因為根節點可以有多個，所以使用鏈表紀錄，要遍歷
   let root = firstScheduledRoot;
   while (root !== null) {
     const next = root.next;
@@ -272,7 +274,7 @@ function processRootScheduleInMicrotask() {
     ) {
       markRootEntangled(root, mergeLanes(currentEventTransitionLane, SyncLane));
     }
-
+    // ! 核心邏輯
     const nextLanes = scheduleTaskForRootDuringMicrotask(root, currentTime);
     if (nextLanes === NoLane) {
       // This root has no more pending work. Remove it from the schedule. To
@@ -293,6 +295,7 @@ function processRootScheduleInMicrotask() {
         lastScheduledRoot = prev;
       }
     } else {
+      // 初次渲染走到此
       // This root still has work. Keep it in the list.
       prev = root;
       if (includesSyncLane(nextLanes)) {
@@ -310,10 +313,10 @@ function processRootScheduleInMicrotask() {
 }
 
 function scheduleTaskForRootDuringMicrotask(root, currentTime) {
-  // console.log(
-  //   "%cscheduleTaskForRootDuringMicrotask[294]",
-  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
-  // );
+  console.log(
+    "%cscheduleTaskForRootDuringMicrotask[294]",
+    "color: #FFFFFF; font-size: 14px; background: #333333;"
+  );
   // This function is always called inside a microtask, or at the very end of a
   // rendering task right before we yield to the main thread. It should never be
   // called synchronously.
@@ -326,16 +329,17 @@ function scheduleTaskForRootDuringMicrotask(root, currentTime) {
 
   // Check if any lanes are being starved by other work. If so, mark them as
   // expired so we know to work on those next.
-  // ! 把優先級低但是過期的任務標註為高優先級
+  // ! 檢查是否有任務lanes要被其他work餓死，一直執行不到。如果有，就標示為過期
+  // ! 這樣可以讓他在下一次被處理到
   markStarvedLanesAsExpired(root, currentTime);
 
   // Determine the next lanes to work on, and their priority.
+  // 獲取現在正在執行的 root 和 root 的優先級
   const workInProgressRoot = getWorkInProgressRoot();
   const workInProgressRootRenderLanes = getWorkInProgressRootRenderLanes();
   /**
-   * 调用getNextLanes获取下一个车道
-   * 如果没有下一个车道了,即调用结果是 NoLanes, 则退出
-   * 退出前执行 root.callbackNode = null和root.callbackPriority = NoLane
+   * 獲取下一個優先級，如果沒有了，就表示調用結果是 NoLanes，則退出
+   * 退出前執行 root.callbackNode = null和root.callbackPriority = NoLane
    */
   const nextLanes = getNextLanes(
     root,
@@ -398,7 +402,7 @@ function scheduleTaskForRootDuringMicrotask(root, currentTime) {
     }
 
     let schedulerPriorityLevel;
-    // 將 lanes 轉換為事件的優先級調用 scheduler(轉換成scheduler可辨識的優先級)
+    // ! 將 lanes 轉換為事件的優先級調用 scheduler(轉換成scheduler可辨識的優先級)
     switch (lanesToEventPriority(nextLanes)) {
       case DiscreteEventPriority:
         schedulerPriorityLevel = ImmediateSchedulerPriority;
@@ -417,6 +421,7 @@ function scheduleTaskForRootDuringMicrotask(root, currentTime) {
         break;
     }
 
+    // ! 調用 scheduler 調度器
     const newCallbackNode = scheduleCallback(
       schedulerPriorityLevel,
       performConcurrentWorkOnRoot.bind(null, root)
@@ -493,6 +498,9 @@ function scheduleImmediateTask(cb) {
       // https://github.com/facebook/react/issues/22459
       // We don't support running callbacks in the middle of render
       // or commit so we need to check against that.
+
+      // key 檢查 - 在渲染或是提交過程中，不支持回調<
+      // 會過早執行
       const executionContext = getExecutionContext();
       if ((executionContext & (RenderContext | CommitContext)) !== NoContext) {
         // Note that this would still prematurely flush the callbacks
@@ -505,7 +513,7 @@ function scheduleImmediateTask(cb) {
         Scheduler_scheduleCallback(ImmediateSchedulerPriority, cb);
         return;
       }
-      cb();
+      cb(); // ! 最主要是執行 cb，cb 是 processRootScheduleInMicrotask
     });
   } else {
     // If microtasks are not supported, use Scheduler.

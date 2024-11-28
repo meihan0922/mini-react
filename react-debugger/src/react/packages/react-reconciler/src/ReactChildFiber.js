@@ -362,7 +362,7 @@ function createChildReconciler(shouldTrackSideEffects) {
     }
   }
 
-  // 要不要給 newFiber 加上 flag Placement
+  // ! 單節點就不用考慮放置，只要看要不要給 newFiber 加上 flag Placement
   // 如果是更新階段，也沒有老fiber或是沒有復用，就要加上替換更新的標記
   function placeSingleChild(newFiber) {
     // This is simpler for the single child case. We only need to do a
@@ -786,6 +786,7 @@ function createChildReconciler(shouldTrackSideEffects) {
     newChildren,
     lanes
   ) {
+    // ! 時間複雜度要壓在 O(n)，如果兩棵樹都要遍歷會變成平方次
     // This algorithm can't optimize by searching from both ends since we
     // don't have backpointers on fibers. I'm trying to see how far we can get
     // with that model. If it ends up not being worth the tradeoffs, we can
@@ -821,6 +822,7 @@ function createChildReconciler(shouldTrackSideEffects) {
     let lastPlacedIndex = 0;
     let newIdx = 0;
     let nextOldFiber = null;
+    // !
     for (; oldFiber !== null && newIdx < newChildren.length; newIdx++) {
       if (oldFiber.index > newIdx) {
         nextOldFiber = oldFiber;
@@ -876,16 +878,19 @@ function createChildReconciler(shouldTrackSideEffects) {
       return resultingFirstChild;
     }
 
+    // ! 初次渲染
     if (oldFiber === null) {
       // If we don't have any more existing children we can choose a fast path
       // since the rest will all be insertions.
       for (; newIdx < newChildren.length; newIdx++) {
         const newFiber = createChild(returnFiber, newChildren[newIdx], lanes);
+        // 檢查是否是有效的fiber
         if (newFiber === null) {
           continue;
         }
         lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
         if (previousNewFiber === null) {
+          // 頭節點
           // TODO: Move out of the loop. This only happens for the first run.
           resultingFirstChild = newFiber;
         } else {
@@ -1181,7 +1186,7 @@ function createChildReconciler(shouldTrackSideEffects) {
   ) {
     const key = element.key;
     let child = currentFirstChild;
-    // 檢查老 fiber 單鏈表中 是否有可以復用的節點
+    // ! 檢查老 fiber 單鏈表中 是否有可以復用的節點
     while (child !== null) {
       // 目前已經是同一層級下，還必須先檢查 key（唯一性），再去檢查 type，才知道可以復用嗎
       // TODO: If key === null and child.key === null, then this only applies to
@@ -1238,7 +1243,7 @@ function createChildReconciler(shouldTrackSideEffects) {
       }
       child = child.sibling;
     }
-    // 初次掛載 或是 更新時沒有找到可以復用的節點
+
     if (element.type === REACT_FRAGMENT_TYPE) {
       const created = createFiberFromFragment(
         element.props.children,
@@ -1249,6 +1254,7 @@ function createChildReconciler(shouldTrackSideEffects) {
       created.return = returnFiber;
       return created;
     } else {
+      // ! 初次掛載 或是 更新時沒有找到可以復用的節點
       const created = createFiberFromElement(element, returnFiber.mode, lanes);
       created.ref = coerceRef(returnFiber, currentFirstChild, element);
       created.return = returnFiber;
@@ -1321,6 +1327,7 @@ function createChildReconciler(shouldTrackSideEffects) {
 
     // Handle object types
     if (typeof newChild === "object" && newChild !== null) {
+      // ! 只有一個節點
       switch (newChild.$$typeof) {
         case REACT_ELEMENT_TYPE:
           return placeSingleChild(
@@ -1436,7 +1443,7 @@ function createChildReconciler(shouldTrackSideEffects) {
     return deleteRemainingChildren(returnFiber, currentFirstChild);
   }
 
-  // 協調子節點，構建新的子 fiber 結構，並且返回新的子 fiber
+  // ! 協調子節點，構建新的子 fiber 結構，並且返回新的子 fiber
   function reconcileChildFibers(
     returnFiber,
     currentFirstChild,

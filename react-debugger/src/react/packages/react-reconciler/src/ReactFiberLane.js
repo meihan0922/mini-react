@@ -473,7 +473,7 @@ export function includesBlockingLane(root, lanes) {
     InputContinuousHydrationLane |
     InputContinuousLane |
     DefaultHydrationLane |
-    DefaultLane;
+    DefaultLane; // 初次渲染
   return (lanes & SyncDefaultLanes) !== NoLanes;
 }
 

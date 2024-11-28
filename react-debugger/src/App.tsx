@@ -1,9 +1,14 @@
 import React, { Component } from "react";
+import { useEffect } from "react";
 import { useState } from "react";
 import * as ReactDOM from "react-dom/client";
 
 function Count({ initCount }: { initCount: number }) {
   const [c, setC] = useState(initCount);
+  useEffect(() => {
+    console.log("count=======");
+  }, []);
+
   return (
     <div>
       {c}
@@ -34,9 +39,9 @@ class TestFn extends Component {
 function App() {
   return (
     <div>
-      <TestFn />
-      {/* <Count initCount={1} />
-      <Count initCount={12} /> */}
+      {/* <TestFn /> */}
+      <Count initCount={1} />
+      {/*<Count initCount={12} /> */}
     </div>
   );
 }

@@ -296,6 +296,7 @@ export function reconcileChildren(
   nextChildren,
   renderLanes
 ) {
+  // ! 組件初次渲染
   if (current === null) {
     // If this is a fresh new component that hasn't been rendered yet, we
     // won't update its child set by applying minimal side-effects. Instead,
@@ -308,6 +309,7 @@ export function reconcileChildren(
       renderLanes
     );
   } else {
+    // ! 組件更新，走協調
     // If the current child is the same as the work in progress, it means that
     // we haven't yet started any work on these children. Therefore, we use
     // the clone algorithm to create a copy of all the current children.
@@ -1093,6 +1095,7 @@ function updateFunctionComponent(
     markComponentRenderStopped();
   }
 
+  // ! 如果是更新階段，但又沒有接到新的更新，則復用老節點，退出更新
   if (current !== null && !didReceiveUpdate) {
     bailoutHooks(current, workInProgress, renderLanes);
     return bailoutOnAlreadyFinishedWork(current, workInProgress, renderLanes);
@@ -1219,8 +1222,10 @@ function updateClassComponent(
   }
   prepareToReadContext(workInProgress, renderLanes);
 
+  // 類組件的實例存在 stateNode
   const instance = workInProgress.stateNode;
   let shouldUpdate;
+  // 初次掛載，還沒建立過
   if (instance === null) {
     resetSuspendedCurrentOnMountInLegacyMode(current, workInProgress);
 
@@ -1381,11 +1386,8 @@ function pushHostRootContext(workInProgress) {
   pushHostContainer(workInProgress, root.containerInfo);
 }
 
+// current: hostRootFiber
 function updateHostRoot(current, workInProgress, renderLanes) {
-  // console.log(
-  //   "%cupdateHostRoot[2219]",
-  //   "color: #FFFFFF; font-size: 14px; background: #333333;"
-  // );
   pushHostRootContext(workInProgress);
 
   if (current === null) {
@@ -1395,7 +1397,9 @@ function updateHostRoot(current, workInProgress, renderLanes) {
   const nextProps = workInProgress.pendingProps;
   const prevState = workInProgress.memoizedState;
   const prevChildren = prevState.element;
+  // ! 1. clone 放入 workInProgress
   cloneUpdateQueue(current, workInProgress);
+  // ! 處理pending update，把他們轉移到 baseQueue，計算出最終的 state
   processUpdateQueue(workInProgress, nextProps, null, renderLanes);
 
   const nextState = workInProgress.memoizedState;
@@ -1495,10 +1499,15 @@ function updateHostRoot(current, workInProgress, renderLanes) {
   } else {
     // Root is not dehydrated. Either this is a client-only root, or it
     // already hydrated.
+    // ! 2. bailout || 協調子節點
     resetHydrationState();
+    // ! 如果子節點根本沒變，直接復用
+    // ! 初次渲染不會走到
+    // ! 只會發生在更新階段，比方類組件shouldCompUpdate, memo等等
     if (nextChildren === prevChildren) {
       return bailoutOnAlreadyFinishedWork(current, workInProgress, renderLanes);
     }
+    // ! 3. 協調子節點
     reconcileChildren(current, workInProgress, nextChildren, renderLanes);
   }
   return workInProgress.child;
@@ -3841,11 +3850,12 @@ function attemptEarlyBailoutIfNoScheduledUpdate(
   return bailoutOnAlreadyFinishedWork(current, workInProgress, renderLanes);
 }
 
+// ! 更新當前的 fiber，比如 props/state更新，生命週期函式執行，hooks函式執行等等
+// ! 1. 更新處理自己 2. 協調子節點
 function beginWork(current, workInProgress, renderLanes) {
   console.log(
-    "%c [ beginWork ]: ",
-    "color: #bf2c9f; background: pink; font-size: 13px;",
-    ""
+    "%creact-debugger/src/react/packages/react-reconciler/src/ReactFiberBeginWork.js:3847 beginWork",
+    "color: white; background-color: #007acc;"
   );
   if (__DEV__) {
     if (workInProgress._debugNeedsRemount && current !== null) {
@@ -3865,6 +3875,7 @@ function beginWork(current, workInProgress, renderLanes) {
     }
   }
 
+  // ! 更新階段
   if (current !== null) {
     const oldProps = current.memoizedProps;
     const newProps = workInProgress.pendingProps;
@@ -3912,6 +3923,8 @@ function beginWork(current, workInProgress, renderLanes) {
       }
     }
   } else {
+    // ! 初次渲染
+    // 標記有沒有接到更新，初次渲染打上沒有
     didReceiveUpdate = false;
 
     if (getIsHydrating() && isForkedChild(workInProgress)) {
@@ -3935,6 +3948,7 @@ function beginWork(current, workInProgress, renderLanes) {
   // the update queue. However, there's an exception: SimpleMemoComponent
   // sometimes bails out later in the begin phase. This indicates that we should
   // move this assignment out of the common path and into each branch.
+  // 清除待更新的優先級
   workInProgress.lanes = NoLanes;
 
   switch (workInProgress.tag) {
@@ -3985,6 +3999,7 @@ function beginWork(current, workInProgress, renderLanes) {
         renderLanes
       );
     }
+    // ! 處理根節點
     case HostRoot:
       return updateHostRoot(current, workInProgress, renderLanes);
     case HostHoistable:

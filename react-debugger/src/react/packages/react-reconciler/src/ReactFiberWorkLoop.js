@@ -288,6 +288,7 @@ const RootCompleted = 5;
 const RootDidNotComplete = 6;
 
 // Describes where we are in the React execution stack
+// 標記 批量更新、render階段、commit階段、沒有階段
 let executionContext = NoContext;
 // The root we're working on
 let workInProgressRoot = null;
@@ -833,7 +834,7 @@ export function performConcurrentWorkOnRoot(root, didTimeout) {
   console.log(
     "%c [ performConcurrentWorkOnRoot ]: ",
     "color: #000; background: yellow; font-size: 13px;",
-    ""
+    "進入到 render 階段"
   );
   if (enableProfilerTimer && enableProfilerNestedUpdatePhase) {
     resetNestedUpdateFlag();
@@ -878,14 +879,17 @@ export function performConcurrentWorkOnRoot(root, didTimeout) {
   // TODO: We only check `didTimeout` defensively, to account for a Scheduler
   // bug we're still investigating. Once the bug in Scheduler is fixed,
   // we can remove this, since we track expiration ourselves.
+  // ! 在某些情況下，會禁止使用時間切片
+  // 如果 work 計算時間過長，（為了防止飢餓而將它視為過期的任務）
+  // 或者我們處於默認啟動同步的模式
   const shouldTimeSlice =
-    !includesBlockingLane(root, lanes) &&
-    !includesExpiredLane(root, lanes) &&
+    !includesBlockingLane(root, lanes) && // ! 初次渲染 會在同步更新裡面
+    !includesExpiredLane(root, lanes) && // ! 後續參考 useDeferredValuePage 例子
     (disableSchedulerTimeoutInWorkLoop || !didTimeout);
 
   let exitStatus = shouldTimeSlice
-    ? renderRootConcurrent(root, lanes)
-    : renderRootSync(root, lanes);
+    ? renderRootConcurrent(root, lanes) // ! 後續參考 useDeferredValuePage 例子
+    : renderRootSync(root, lanes); // ! 不使用時間切片
   if (exitStatus !== RootInProgress) {
     if (exitStatus === RootErrored) {
       // If something threw an error, try rendering one more time. We'll
@@ -1842,6 +1846,12 @@ export function renderHasNotSuspendedYet() {
 // and more similar. Not sure it makes sense to maintain forked paths. Consider
 // unifying them again.
 function renderRootSync(root, lanes) {
+  console.log(
+    "%c [ renderRootSync ]: ",
+    "color: #bf2c9f; background: pink; font-size: 13px;",
+    ""
+  );
+  // ! 紀錄 render 階段開始
   const prevExecutionContext = executionContext;
   executionContext |= RenderContext;
   const prevDispatcher = pushDispatcher(root.containerInfo);
@@ -1866,8 +1876,10 @@ function renderRootSync(root, lanes) {
       }
     }
 
+    // ! workInProgressTransitions 賦值
     workInProgressTransitions = getTransitionsForLanes(root, lanes);
 
+    // ! 初始化
     // ! 這裏有先調用處理 updateQueue 陣列內(尚未掛載到 fiber.updateQueue)的更新
     prepareFreshStack(root, lanes);
   }
@@ -1924,6 +1936,7 @@ function renderRootSync(root, lanes) {
           }
         }
       }
+      // ! 重點邏輯
       workLoopSync();
       break;
     } catch (thrownValue) {
@@ -1985,7 +1998,6 @@ function workLoopSync() {
     ""
   );
   // ! performUnitOfWork和completeUnitOfWork合作完成了一個深度優先搜尋的邏輯，遍歷了整個DOM 樹，產生了Fiber 樹"
-
   // Perform work without checking if we need to yield between fiber.
   while (workInProgress !== null) {
     performUnitOfWork(workInProgress);
@@ -1994,9 +2006,9 @@ function workLoopSync() {
 
 function renderRootConcurrent(root, lanes) {
   console.log(
-    "%c [ renderRootConcurrent ]: ",
-    "color: #fff; background: #bf2c9f; font-size: 13px;",
-    ""
+    "%creact-debugger/src/react/packages/react-reconciler/src/ReactFiberWorkLoop.js:2008",
+    "color: white; background-color: #26bfa5;",
+    "renderRootConcurrent"
   );
   const prevExecutionContext = executionContext;
   executionContext |= RenderContext;
@@ -2203,6 +2215,7 @@ function renderRootConcurrent(root, lanes) {
         // likely mocked.
         workLoopSync();
       } else {
+        // !
         workLoopConcurrent();
       }
       break;
@@ -2250,6 +2263,7 @@ function renderRootConcurrent(root, lanes) {
 /** @noinline */
 function workLoopConcurrent() {
   // Perform work until Scheduler asks us to yield
+  // ! 如果是非緊急更新，調用 scheduler 看時間切片，是否要中斷
   while (workInProgress !== null && !shouldYield()) {
     // $FlowFixMe[incompatible-call] found when upgrading Flow
     performUnitOfWork(workInProgress);
@@ -2279,8 +2293,10 @@ function performUnitOfWork(unitOfWork) {
   }
 
   resetCurrentDebugFiberInDEV();
+  // ! 把新的 props 更新到 memoizedProps
   unitOfWork.memoizedProps = unitOfWork.pendingProps;
   if (next === null) {
+    // ! 如果是葉子節點，就是沒有子節點了，那麼當前的 work 結束
     // If this doesn't spawn new work, complete the current work.
     completeUnitOfWork(unitOfWork);
   } else {
@@ -2635,6 +2651,7 @@ function commitRootImpl(
     "color: #fff; background: darkblue; font-size: 13px;",
     ""
   );
+
   do {
     // `flushPassiveEffects` will call `flushSyncUpdateQueue` at the end, which
     // means `flushPassiveEffects` will sometimes result in additional
@@ -2642,6 +2659,8 @@ function commitRootImpl(
     // no more pending effects.
     // TODO: Might be better if `flushPassiveEffects` did not automatically
     // flush synchronous work at the end, to avoid factoring hazards like this.
+    // ! 處理 useEffect, useLayoutEffect
+    // ! 但不是在這裡執行，因為是異步的
     flushPassiveEffects();
   } while (rootWithPendingPassiveEffects !== null);
   flushRenderPhaseStrictModeWarningsInDEV();
@@ -2732,6 +2751,7 @@ function commitRootImpl(
     (finishedWork.subtreeFlags & PassiveMask) !== NoFlags ||
     (finishedWork.flags & PassiveMask) !== NoFlags
   ) {
+    // !!!! 這裡才是回調 effect
     if (!rootDoesHavePassiveEffects) {
       rootDoesHavePassiveEffects = true;
       pendingPassiveEffectsRemainingLanes = remainingLanes;
@@ -2742,7 +2762,9 @@ function commitRootImpl(
       // the previous render and commit if we throttle the commit
       // with setTimeout
       pendingPassiveTransitions = transitions;
+      // !!!!!! 異步處理 effect
       scheduleCallback(NormalSchedulerPriority, () => {
+        debugger;
         flushPassiveEffects();
         // This render triggered passive effects: release the root cache pool
         // *after* passive effects fire to avoid freeing a cache pool that may
@@ -3065,6 +3087,7 @@ function releaseRootPooledCache(root, remainingLanes) {
 }
 
 export function flushPassiveEffects() {
+  debugger;
   // Returns whether passive effects were flushed.
   // TODO: Combine this check with the one in flushPassiveEFfectsImpl. We should
   // probably just combine the two functions. I believe they were only separate
@@ -3089,6 +3112,7 @@ export function flushPassiveEffects() {
     try {
       ReactCurrentBatchConfig.transition = null;
       setCurrentUpdatePriority(priority);
+      // ! 執行 effect 內容
       return flushPassiveEffectsImpl();
     } finally {
       setCurrentUpdatePriority(previousPriority);

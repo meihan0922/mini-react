@@ -35,13 +35,13 @@
 
 ```mermaid
 graph LR
-    A[任務調度] --> B[與外界的關聯: unstable_scheduleCallback];
-    B --> C[1. 創建任務];
-    B --> D[2. 把任務放入任務池];
-    D --> E[1. 立即要執行的放入 taskQueue];
-    D --> F[2. 延遲執行的放入 timerQueue];
-    B --> G[1. 初始化任務池];
-    B --> H[2. 任務調度];
+    A[任務調度] --> B[與外界的關聯:scheduleCallback];
+    B --> C[創建任務];
+    B --> D[把任務放入任務池];
+    D --> E[立即要執行的放入 taskQueue];
+    D --> F[延遲執行的放入 timerQueue];
+    B --> G[初始化任務池];
+    B --> H[任務調度];
     H --> I[調度方式];
     H --> J[算法：最小堆];
     J --> K[peek];
@@ -126,7 +126,7 @@ react 按照使用者的瀏覽器支援度，選擇使用其中一種非同步 a
   - JS 引擎和頁面繪製在同一線程當中，GUI 渲染和 JS 執行是互斥的，如果 JS 引擎任務執行時間過長，就會推遲渲染
 - 為了讓動畫等任務可以按照優先級渲染，需要使用 window.requestAnimationFrame & window.requestIdleCallback
 
-![flow](./assets/flow.svg)
+![flow](../../assets/flow.svg)
 
 ```js
 /**  requestAnimationFrame，

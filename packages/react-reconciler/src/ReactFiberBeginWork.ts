@@ -225,6 +225,7 @@ function reconcileChildren(
   if (current === null) {
     workInProgress.child = mountChildFibers(workInProgress, null, nextChildren);
   } else {
+    // 初次渲染根節點會走到這裡
     workInProgress.child = reconcileChildFibers(
       workInProgress,
       current.child,

@@ -115,8 +115,114 @@ react 當中用 jsx 來表現視圖，在 v17 之前，必須經過 `babel-loade
 需要將 fiber tree 更新完成後，更新 dom tree 執行生命週期方法
 react 內部將一次更新分為兩個階段，**render**、**commit**。
 
-- **render**: 對 fiber tree 做更新操作，收集更新過程中產生的副作用
-- **commit**: 處理 render 階段收集的副作用
+1. render: 遍歷 fiber 樹(VDOM)，比較新舊節點，計算需要更新的部分。又分為兩階段
+   1. beginWork: 按照 workInProgress tag，執行子節點的 fiber 創建
+      - 看有沒有要走 diff，走到 bailout
+      - 沒有子節點則停止，返回子節點（深度優先，一路執行 child)
+   2. completeUnitWork: 循環執行創建真實 DOM
+      - 把 workInProgress 轉移指針到同層級的兄弟節點，回到 beginWork，直到所有兄弟節點與其子節點都完成，這時指針轉移到父節點上，因為此時的父節點已經執行過 beginWork，不需要跳出 completeUnitWork 的迴圈，執行 DOM 創建之餘，把所有有 stateNode 的子節點（需要略過 Fragment、child === null）全部 appendAllChildren 到父節點 stateNode 中。以上 重複直到根節點。
+1. commit: VDOM -> DOM
+
+- 🌟 需要注意的是：
+
+  - render 階段是可以被中斷和暫停的
+    - 在併發模式下，可中斷先處理高優先級的任務，稍後再繼續。fiber 架構支持時間切片，每次只執行一小部分，剩餘的部分稍後可以繼續
+    - 過程：從"根節點"開始遍歷，標記需要更新的節點、創建和更新樹
+  - **commit 是不可被打斷的**
+    - 將需要更新的部分渲染到真實 DOM 上，並且觸發生命週期和副作用。
+    - **是同步進行的**，因為直接操作 DOM 或是觸發副作用，為了保證更新的完整性，避免 DOM 的狀態不一致或副作用導致意外行為
+    - 過程：
+      1. 執行某些生命週期方法（如 getSnapshotBeforeUpdate）
+      2. 將變化應用到 DOM 或其他目標
+      3. 執行副作用，如 `componentDidMount`、`useEffect` 的 `cleanup` 和 `setup`
+
+#### 低優先級的工作被打斷處理高優先級後的流程？
+
+- 任務的狀態
+  - fiber 會記載是否已經完成，當前是否需要更新
+  - 低優先級的任務會保留在 updateQueue BaseQueue 隊列上，再轉移控制權
+- 低優先級的 fiber 狀態
+  - 被打斷的低優先級的 fiber 子樹會保留，但不會提交 commit
+  - ui 顯示的仍然是之前已經提交的版本，也就是之前用戶已經看到的最後一次成功 commit 的狀態
+- 恢復低優先級任務
+  - 會從中斷的位置繼續，不會從頭開始
+  - 會重新檢查中斷期間是否又有新的更新被加入，或是更新被合併，或是優先級被調整
+
+#### 源碼當中的 renderRootConcurrent 和 renderRootSync
+
+在源碼當中，會看到 `performConcurrentWorkOnRoot`
+
+```ts
+// ! 在某些情況下，會禁止使用時間切片
+// 如果 work 計算時間過長，（為了防止飢餓而將它視為過期的任務）
+// 或者我們處於默認啟動同步的模式
+const shouldTimeSlice =
+  !includesBlockingLane(root, lanes) && // ! 初次渲染 會在同步更新裡面
+  !includesExpiredLane(root, lanes) && // ! 後續參考 useDeferredValuePage 例子
+  (disableSchedulerTimeoutInWorkLoop || !didTimeout);
+
+let exitStatus = shouldTimeSlice
+  ? renderRootConcurrent(root, lanes) // ! 後續參考 useDeferredValuePage 例子
+  : renderRootSync(root, lanes); // ! 不使用時間切片
+```
+
+去調用不同的 renderRoot 模式，究竟有什麼不同？
+
+```ts
+function workLoopConcurrent() {
+  // Perform work until Scheduler asks us to yield
+  // ! 如果是非緊急更新，調用 scheduler 看時間切片，是否要中斷
+  while (workInProgress !== null && !shouldYield()) {
+    // $FlowFixMe[incompatible-call] found when upgrading Flow
+    performUnitOfWork(workInProgress);
+  }
+}
+
+function workLoopSync() {
+  console.log(
+    "%c [ workLoopSync ]: ",
+    "color: #fff; background: #000; font-size: 13px;",
+    ""
+  );
+  // ! performUnitOfWork和completeUnitOfWork合作完成了一個深度優先搜尋的邏輯，遍歷了整個DOM 樹，產生了Fiber 樹"
+  // Perform work without checking if we need to yield between fiber.
+  while (workInProgress !== null) {
+    performUnitOfWork(workInProgress);
+  }
+}
+```
+
+可以看到插在一個 `shouldYield`，調用了來自 `scheduler` 包中的函式，可以判斷是否時間切片的期限已到，交還控制權給瀏覽器。但這有什麼不同？
+
+先看到 `workLoopSync` 他是處理完一整個子節點包含他的 子樹們！是一個任務。但 `workLoopConcurrent` 是處理一個節點後，要處理下一個節點時，檢查！是將整個協調的工作分成很多小片段。
+
+- `workLoopConcurrent`: 每處理一個節點檢查
+  - 是否超出時間預算(5ms)
+  - 是否有更高優先級的任務
+- `workLoopSync`: 會同步完成整個 fiber 遍歷和協調，會從根節點開始，按深度優先完成所有的工作，不可中斷。中間也不會檢查或處理其他任務，只能等待當前任務完成。
+  - 初次渲染、不支持併發的任務（Legacy Mode 或是 關鍵生命週期、副作用邏輯、錯誤邊界）、高優先級的任務（如用戶主動觸發的緊急更新）
+  - 用戶在交互上可能會感到卡頓
+
+#### 當有高優先級的任務？要怎麼中斷處理？
+
+調用 `ensureRootIsScheduled` ，檢查當前是否已經有任務在執行？
+如果已經有任務，會拿當前新加入的任務的，新的 fiberRootNode 上的 pendingLanes 和正在進行中的任務優先級比較（新加入任務時，會更新 fiberRootNode 上的 pendingLanes）。決定是否要重新安排調度。
+新的高優先級的任務會透過 Scheduler 加入調度隊列。再次從 根節點構建 fiber 樹。高優先級的任務的 lane 會先覆蓋 workInProgress 樹的 lanes，處理完成後再復原
+
+```js
+              [用戶觸發更新]
+                    ↓
+            [更新添加到更新隊列]
+                    ↓
+      [更新 fiberRootNode.pendingLanes]
+                    ↓
+    [調用 ensureRootIsScheduled 檢查調度]
+                    ↓
+    [Scheduler 中斷當前任務，處理高優先級任務]
+                    ↓
+       [從 fiberRootNode 根節點開始協調]
+
+```
 
 ### 時間切片 time slice
 
