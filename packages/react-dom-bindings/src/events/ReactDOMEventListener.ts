@@ -116,7 +116,7 @@ function dispatchEvent(
     eventSystemFlags,
     target
   );
-  console.log(dispatchQueue);
+
   processDispatchQueue(dispatchQueue, eventSystemFlags);
 }
 

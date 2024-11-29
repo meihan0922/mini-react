@@ -27,6 +27,14 @@ let executionContext: ExecutionContext = NoContext;
 
 // 創建指針，指向正在處理的節點
 let workInProgress: Fiber | null = null;
+/**
+ * ?? 為什麼要紀錄 workInProgressRoot？
+ * A:
+ * 1. 在併發模式下，workLoop render 是有可能被中斷的！如果被中斷，且root保持一致，就可以正確的恢復，從中斷的地方開始構建樹
+ * 2. 任務中斷後，用戶觸發了更高優先級的更新，原先的 root 會被丟棄，用於處理高優先級的更新
+ *    那原先低優先級的fiber樹已經部分構建或是高優先級的任務修改根節點，但這棵樹不再適合繼續使用，狀態會不一致
+ * 3. 用戶調度了 createRoot 或是 render，改了樹
+ */
 let workInProgressRoot: FiberRoot | null = null;
 let workInProgressDeferredLane: Lane = NoLane;
 
@@ -42,7 +50,6 @@ export function scheduleUpdateOnFiber(root: FiberRoot, fiber: Fiber) {
    * 但因為目前還沒處理 lane 先忽略掉 1.
    **/
 
-  workInProgressRoot = root;
   workInProgress = fiber;
   // TODO: setState 應該要走別的邏輯，暫時走這
   ensureRootIsScheduled(root);
@@ -62,14 +69,17 @@ function commitRoot(root: FiberRoot) {
   // ! 1. commit 階段開始
   const prevExecutionContext = executionContext;
   executionContext |= CommitContext;
-  // ! 2.1 2.1 mutation 階段，遍歷 fiber，渲染 DOM 樹
-  // useLayoutEffect 也應當在這個階段執行
+  // ! 2.1 mutation 階段，遍歷 fiber，渲染 DOM 樹
   commitMutationEffects(root, root.finishedWork as Fiber);
+  // 源碼中 有另外處理 commitLayoutEffects，useLayoutEffect 也應當在這個階段2.1.1後執行
   // ! 2.2 passive effect 階段，執行 passive effect 階段
   // 這也是為什麼 useEffect 延遲調用的原因
   scheduleCallback(NormalPriority, () => {
     flushPassiveEffect(root.finishedWork as Fiber);
   });
+  // ! 2.1.1 將完成的新樹賦值成為當前樹
+  root.current = root.finishedWork as Fiber;
+
   // ! 3. commit 結束，把數據還原
   executionContext = prevExecutionContext;
   workInProgressRoot = null;
@@ -81,7 +91,14 @@ function renderRootSync(root: FiberRoot) {
   executionContext |= RenderContext;
 
   // ! 2. 初始化數據，準備好 WorkInProgress 樹
-  prepareFreshStack(root);
+  // 源碼還有判斷 lanes 優先級的改變
+  // react-debugger/src/react/packages/react-reconciler/src/ReactFiberWorkLoop.js
+  // if (workInProgressRoot !== root || workInProgressRootRenderLanes !== lanes) {
+  // root 改變時，才會建立一顆新的 workInProgress 樹
+  // 用戶觸發了更高優先級的更新，原先的 root 會被丟棄 或是 用戶調度了 createRoot 或是 render，改了樹
+  if (workInProgressRoot !== root) {
+    prepareFreshStack(root);
+  }
 
   // ! 3. 遍歷構建 fiber 樹，深度優先遍歷
   workLoopSync();

@@ -325,7 +325,7 @@ react element 上，不同的標籤，生成不同屬性的 fiber。其他相關
 > [!TIP] 源碼筆記
 > [react-debugger/src/react/packages/react-reconciler/src/ReactInternalTypes.js](./react-debugger/src/react/packages/react-reconciler/src/ReactInternalTypes.js) > [react-debugger/src/react/packages/react-reconciler/src/ReactWorkTags.js](./react-debugger/src/react/packages/react-reconciler/src/ReactWorkTags.js)
 
-手寫：複製型別到 src/ReactInternalTypes.js
+手寫：src/ReactInternalTypes.js
 
 ```ts
 export type Fiber = {|
@@ -342,6 +342,7 @@ export type Fiber = {|
   // Tag identifying the type of fiber.
   // 標記 fiber 類型，及描述組件類型
   // ex: 原生標籤、函式組件、類組件、Fragment等等。
+  // 參考'packages/react-reconciler/src/ReactWorkTags.ts'
   tag: WorkTag,
 
   // Unique identifier of this child.
@@ -356,7 +357,7 @@ export type Fiber = {|
 
   // The resolved function/class/ associated with this fiber.
   // 標記組件類型
-  // 如果是原生組件，這立是字符串
+  // 如果是原生組件，這裡是字符串
   // 如果是函式組件，這裡是函式
   // 如果是類組件，這裡是類
   type: any,
@@ -387,7 +388,7 @@ export type Fiber = {|
   // 下一個兄弟節點
   sibling: Fiber | null,
   // 紀錄節點在當前層級中的位置下標，用於 diff 時判斷是否需要位移
-  // 鏈表沒有下標，所以才有 index 紀錄
+  // 因為鏈表結構沒有下標，所以才有 index 紀錄
   index: number,
 
   // The ref last used to attach this node.
@@ -412,6 +413,7 @@ export type Fiber = {|
   // 不同的組件的 memoizedState 存儲不同
   // 類組件：state
   // 函式組件：hook[0]
+  // HostRoot: RootState
   memoizedState: any,
 
   // Dependencies (contexts, events) for this fiber, if it has any
@@ -449,7 +451,7 @@ export type Fiber = {|
   // This is a pooled version of a Fiber. Every fiber that gets updated will
   // eventually have a pair. There are cases when we can clean up pairs to save
   // memory if we need to.
-  // 用於儲存更新前的 fiber
+  // 用於儲存更新前的 fiber，到更新的時候要比對新老 fiber用
   alternate: Fiber | null,
 |};
 ```
@@ -484,7 +486,7 @@ export function createFiber(
 }
 
 function FiberNode(tag: WorkTag, pendingProps: unknown, key: string | null) {
-  // 1. 基本的屬性
+  // 1. 基本的屬性，描述組件的類型，比如原生標籤、函式組件、類組件、Fragment等等
   this.tag = tag;
   this.key = key;
   this.elementType = null;
@@ -562,7 +564,7 @@ export function createWorkInProgress(current: Fiber, pendingProps: any): Fiber {
   return workInProgress;
 }
 
-// 按照Element 創造出 fiber
+// 按照 ReactElement 創造出 fiber，在掛載時，解析子節點用得到
 export function createFiberFromElement(element: ReactElement) {
   const { type, key } = element;
   const pendingProps = element.props;
@@ -575,6 +577,12 @@ export function createHostRootFiber(tag: RootTag): Fiber {
 }
 
 // 按照不同的 type 創造出不同的 fiber
+/**
+ * type:標記組件類型
+ * 如果是原生組件，這裡是字符串
+ * 如果是函式組件，這裡是函式
+ * 如果是類組件，這裡是類
+ */
 export function createFiberFromTypeAndProps(
   type: any,
   key: null | string,
@@ -631,13 +639,7 @@ function shouldConstruct(Component: Function) {
 }
 ```
 
-但整個 fiber 樹要怎麼和一開始調用 `createRoot`傳入的實體 DOM (ex: div#root) 做關聯呢？
-在 `createRoot` 使用後，為什麼身上就有 `render` 方法？表示他是一個類，prototype 有這個方法嗎？
-`createRoot` 做了哪些事情呢？
-他建立了 `FiberRootNode`，再創建 fiber 的根節點 `HostRootFiber`，並初始化狀態。
-調用 `render` 時，才會開始建立 fiber 子節點。
-
-所以 - `FiberRootNode` 、 `HostRootFiber` 還有 從 `react-dom/client`引用的 `createRoot` 三者的關聯性是什麼？
+❓ 但整個 fiber 樹要怎麼和一開始調用 `createRoot`傳入的實體 DOM (ex: div#root) 做關聯呢？在 `createRoot` 使用後，為什麼身上就有 `render` 方法？表示他是一個類，prototype 有這個方法嗎？`createRoot` 做了哪些事情呢？
 
 ```ts
 import { createRoot } from "react-dom/client";
@@ -645,6 +647,40 @@ import { createRoot } from "react-dom/client";
 const domNode = document.getElementById("root");
 const root = createRoot(domNode);
 root.render(<App />);
+```
+
+1. 建立了 `FiberRootNode`
+2. 再創建 fiber 的根節點 `HostRootFiber`，並初始化狀態。
+3. 調用 `render` 時，才會開始建立 fiber 子節點。
+
+所以 - `FiberRootNode` 、 `HostRootFiber` 還有 從 `react-dom/client`引用的 `createRoot` 三者的關聯性是什麼？
+
+- `reactDomRoot`:
+  - 屬於 react-dom 套件。
+  - `createRoot` 會回傳 `reactDomRoot`; 他對 RootNode 進行了封裝。
+  - 暴露了 render, unmount 的方法。
+  - 他的 `_internalRoot` 指向 `FiberRootNode`。
+- `FiberRootNode`:
+  - 屬於 react-reconciler 包。
+  - 負責管理整個應用的 Fiber 結構。❌ 注意不是 fiber 類型。保存 fiber 建置過程中所依賴的全域狀態.包含了根 Fiber 節點（rootFiber）以及 Fiber 樹的其他屬性，如調度和更新狀態，（ex:中斷低優先級任務時，會紀錄當前處理的位置和狀態，之後恢復執行時可以不用從頭開始）
+  - 他的 `containerInfo` 指向 `div#root`
+  - 他的 `current` 指向 `HostRootFiber`
+- `HostRootFiber`:
+  - 屬於 react-reconciler 包。
+  - 第一個 Fiber，也代表了整個根 fiber 節點。
+  - 負責跟蹤所有子節點跟他們的狀態。
+  - 是`FiberRootNode`的一部分。
+  - 他的`stateNode`指向`FiberRootNode`
+
+在一開始的 createRoot ，主要的目標就是建立下方這張關係圖！
+
+```mermaid
+flowchart TB
+HostRootFiber -- stateNode --> FiberRootNode
+FiberRootNode -- current --> HostRootFiber
+ReactDomRoot -- _internalRoot --> FiberRootNode
+FiberRootNode -- containerInfo --> div#root
+div#root -- _reactContainer+randomKey --> HostRootFiber
 ```
 
 ## 創建 Fiber 和 FiberRoot
@@ -655,34 +691,45 @@ root.render(<App />);
 
 在 fiber 樹的最外層，會有一個物件，包裹住新舊樹、根 root DOM 和整個樹相關的其他屬性。
 
-- `reactDomRoot`:
-  - 屬於 react-dom 套件。
-  - `createRoot` 會回傳 `reactDomRoot`; 他對 RootNode 進行了封裝。
-  - 暴露了 render, unmount 的方法。
-  - 他的 `_internalRoot` 指向 `FiberRootNode`。
-- `FiberRootNode`:
-  - 屬於 react-reconciler 包。
-  - 負責管理整個應用的 Fiber 結構。❌ 注意不是 fiber 類型。保存 fiber 建置過程中所依賴的全域狀態.包含了根 Fiber 節點（rootFiber）以及 Fiber 樹的其他屬性，如調度和更新狀態。
-  - 他的 `containerInfo` 指向 `div#root`
-  - 他的 `current` 指向 `HostRootFiber`
-- `HostRootFiber`:
-  - 屬於 react-reconciler 包。
-  - 第一個 Fiber，也代表了整個根 fiber 節點。
-  - 負責跟蹤所有子節點跟他們的狀態。
-  - 是`FiberRootNode`的一部分。
-  - 他的`stateNode`指向`FiberRootNode`
+手寫：
+核心代碼 src/ReactFiberRoot.ts
+類型主要在 src/ReactInternalTypes.ts
 
-```mermaid
-flowchart TB
-HostRootFiber --stateNode--> FiberRootNode
-FiberRootNode --current--> HostRootFiber
-ReactDomRoot --_internalRoot--> FiberRootNode
-FiberRootNode --(containerInfo)--> div#root
-div#root --(_reactContainer$+randomKey)--> HostRootFiber
+```ts
+export type Container = Element | Document | DocumentFragment;
+
+export type FiberRoot = {
+  containerInfo: Container;
+  // 掛載舊的樹，目前呈現的樹
+  current: Fiber;
+
+  // A finished work-in-progress HostRoot that's ready to be committed.
+  // 處理完後，準備提交的樹 workInprogress, 類型是 HostRoot
+  finishedWork: Fiber | null;
+
+  // Timeout handle returned by setTimeout. Used to cancel a pending timeout, if
+  // it's superseded by a new one.
+  timeoutHandle: number;
+
+  // Node returned by Scheduler.scheduleCallback. Represents the next rendering
+  // task that the root will work on.
+  callbackNode: any;
+  callbackPriority: Lane;
+  eventTimes: LaneMap<number>;
+  expirationTimes: LaneMap<number>;
+
+  // 未處理的 lanes
+  pendingLanes: Lanes;
+  suspendedLanes: Lanes;
+  pingedLanes: Lanes;
+  expiredLanes: Lanes;
+
+  finishedLanes: Lanes;
+
+  entangledLanes: Lanes;
+  entanglements: LaneMap<Lanes>;
+};
 ```
-
-> 核心代碼 src/ReactFiberRoot.ts
-> 類型主要在 src/ReactInternalTypes.ts
 
 ```ts
 import { NoLane, NoLanes, createLaneMap, NoTimestamp } from "./ReactFiberLane";
@@ -718,11 +765,11 @@ export function FiberRootNode(containerInfo, tag) {
 }
 
 export function createFiberRoot(
-  containerInfo: Container, // 就是者 document.getElementById('root')
+  containerInfo: Container, // 就是 document.getElementById('root')
   tag: RootTag,
   initialChildren: ReactNodeList
 ): FiberRoot {
-  // !注意#root 以containerInfo掛載FiberRoot上，之後commit會用到
+  // !注意#root 以 containerInfo 掛載FiberRoot上，之後commit會用到
   const root: FiberRoot = new FiberRootNode(containerInfo, tag);
 
   // Cyclic construction. This cheats the type system right now because
@@ -740,7 +787,7 @@ export function createFiberRoot(
   };
   uninitializedFiber.memoizedState = initialState;
 
-  initializeUpdateQueue(uninitializedFiber);
+  // initializeUpdateQueue(uninitializedFiber);
 
   return root;
 }
@@ -811,13 +858,6 @@ export default { createRoot };
 
 手寫： @mono/react-reconciler/src/ReactFiberReconciler.ts
 
-- 源碼邏輯：
-  1. 獲取 current, lane(requestLane)// 手寫這裡先略過
-  2. 創建 update // 手寫這裡先略過
-  3. update 入隊放到 fiber.updateQueue 暫存區 // 手寫這裡先略過
-  4. scheduleUpdateOnFiber 啟動調度
-  5. entangleTranstions // 手寫這裡先略過
-
 ```ts
 import { ReactNodeList } from "@mono/shared/ReactTypes";
 import type { Container, Fiber, FiberRoot } from "./ReactInternalTypes";
@@ -825,7 +865,7 @@ import type { RootTag } from "./ReactFiberRoot";
 import { createFiberRoot } from "./ReactFiberRoot";
 
 /**
- * 源碼：創建並返回 FiberRootNode
+ * `createFiberRoot` 源碼：創建並返回 FiberRootNode
  * a. 實例化 FiberRootNode，創建 FiberRoot
  * b. createHostRootFiber 創建原生標籤的 根 Fiber
  * c. 循環構造 root 與 unitializedFiber
@@ -836,22 +876,37 @@ export function createContainer(containerInfo: Container, tag: RootTag) {
   return createFiberRoot(containerInfo, tag);
 }
 
+// container 指向 fiberRoot
+// fiberRoot.currnet 指向 HostRootFiber
 export function updateContainer(element: ReactNodeList, container: FiberRoot) {
   // 組件初次渲染
+  /**
+   * `updateContainer` 源碼邏輯：
+   * 1. 獲取 current, lane(requestLane)// 手寫這裡先略過
+   * 2. 創建 update // 手寫這裡先略過
+   * 3. update 入隊放到 fiber.updateQueue 暫存區 // 手寫這裡先略過
+   * 4. scheduleUpdateOnFiber 啟動調度
+   * 5. entangleTranstions // 手寫這裡先略過
+   */
 
-  // container 指向 fiberRoot
-  // fiberRoot.currnet 指向 HostRootFiber
-  // 1. 獲取 HostRootFiber, lane
-  const current = container.current;
-  // 源碼中，初次渲染 子element 會作為 update.payload
+  const current = container.current; // HostRootFiber
+  // 源碼中，初次渲染會創建一個 Update，把 子element 作為 update.payload 掛到更新隊列
+  // payload 會被處理為 memoizedState 的初始值
+
   // const eventTime = getCurrentTime();
   // const update = createUpdate(eventTime, lane);
   // update.payload = { element };
+  // enqueueUpdate(current, update);  將 update 加入 hostRootFiber 的 UpdateQueue 中
 
-  // 初次渲染時 element 會放到 memoizedState
+  // 然後在 performSyncWorkOnRoot 處理更新，processUpdateQueue
+  // 將 payload.element 放入 workInProgress.memoizedState
+
+  // 初次渲染完成後，子element 最終會掛載到 memoizedState，不會長期停留在 update.payload
+
+  // 這邊先省略 update 的流程，直接放入 memoizedState
   current.memoizedState = { element };
 
-  // scheduleUpdateOnFiber(root, current, lane, eventTime);
+  scheduleUpdateOnFiber(container, current);
 }
 ```
 
@@ -862,12 +917,12 @@ export function updateContainer(element: ReactNodeList, container: FiberRoot) {
 
 手寫： @mono/react-reconciler/ReactFiberWorkLoop
 
-在 `updateContainer()` 中調度 `scheduleUpdateOnFiber()`，這也是之後頁面觸發渲染都會執行的函式(頁面初次渲染、類組件 setState/forceUpdate、函數組件 setState)。會將指針指向正在處理的節點。
-他主要是負責
+在 `updateContainer()` 中調度 `scheduleUpdateOnFiber()`，這也是之後頁面觸發渲染都會執行的函式(頁面初次渲染、類組件 `setState`/`forceUpdate、函數組件` `setState`)。會將指針指向正在處理的節點。
 
-1. 標記更新: 將更新任務加入調度隊列
-2. 確保高優先級的先執行
-3. 啟動調度
+- 源碼核心:
+  1. `markRootUpdated`： 標記根節點有一個 pending update(手寫略過)
+  2. `ensureRootIsScheduled`：主要是創建微任務去啟動 `scheduler` 調度器，調度器再去執行 react-reconciler 的 workLoop
+  3. `scheduleImmediateTask -> processRootScheduleInMicroTask`：啟動調度
 
 ```ts
 import { Lane } from "./ReactFiberLane";
@@ -875,24 +930,21 @@ import { Fiber, FiberRoot } from "./ReactInternalTypes";
 
 // 創建指針，指向正在處理的節點
 let workInProgress: Fiber | null = null;
+/**
+ * ?? 為什麼要紀錄 workInProgressRoot？
+ * A:
+ * 1. 在併發模式下，workLoop render 是有可能被中斷的！如果被中斷，且root保持一致，就可以正確的恢復，從中斷的地方開始構建樹
+ * 2. 任務中斷後，用戶觸發了更高優先級的更新，原先的 root 會被丟棄，用於處理高優先級的更新
+ *    那原先低優先級的fiber樹已經部分構建或是高優先級的任務修改根節點，但這棵樹不再適合繼續使用，狀態會不一致
+ * 3. 用戶調度了 createRoot 或是 render，改了樹
+ */
 let workInProgressRoot: FiberRoot | null = null;
 
 // 頁面初次渲染、類組件 setState/forceUpdate、函數組件 setState 都會走到此
 export function scheduleUpdateOnFiber(root: FiberRoot, fiber: Fiber) {
-  /**
-   * 源碼核心:
-   * 1. markRootUpdated: 標記根節點有一個 pending update
-   * 2. ensureRootIsScheduled：主要是創建微任務去啟動 scheduler 調度器，調度器再去執行 react-reconciler 的 workLoop
-   *    a. scheduleImmediateTask
-   *    b. processRootScheduleInMicroTask
-   *
-   * 但因為目前還沒處理 lane 先忽略掉 1.
-   **/
-
-  workInProgressRoot = root;
   workInProgress = fiber;
 
-  // 注意到所有的更新都是從根節點開始
+  // 注意到所有的調度都是從根節點開始，
   // 在源碼當中，他會檢查是否已經有調度任務了
   // 如果已經有任務，會拿當前新加入的任務的，新的 fiberRootNode 上的 pendingLanes 和正在進行中的任務優先級比較（新加入任務時，會更新 fiberRootNode 上的 pendingLanes）。決定是否要重新安排調度
   // 新的高優先級的任務會透過 Scheduler 加入調度隊列。
@@ -904,26 +956,27 @@ export function scheduleUpdateOnFiber(root: FiberRoot, fiber: Fiber) {
 
 ### ensureRootIsScheduled -> scheduleTaskForRootDuringMicrotask ，確保在當次瀏覽器工作循環執行啟動 scheduler 包中的調度
 
-將 FiberRoot 傳入，把調度任務加入微任務， 確保在當次瀏覽器工作循環執行啟動 scheduler 包中的調度，再去執行 react-reconciler 的 workLoop
+將 FiberRoot 傳入，把調度任務加入微任務， 確保在當次瀏覽器工作循環執行啟動 `scheduler` 包中的調度，再去執行 `react-reconciler` 的 `workLoop`
 
 - 調度開始是透過 [window.queueMicrotask](https://developer.mozilla.org/zh-CN/docs/Web/API/Window/queueMicrotask) 確保在當次瀏覽器工作循環執行啟動 scheduler 包中的調度 [scheduleCallback](./packages/scheduler/README.md)
 
 > [!TIP] 源碼筆記
 > [react-debugger/src/react/packages/react-dom-bindings/src/client/ReactFiberConfigDOM.js](./react-debugger/src/react/packages/react-dom-bindings/src/client/ReactFiberConfigDOM.js)
 
-```ts
-// -------------------
-//     Microtasks
-// -------------------
-export const supportsMicrotasks = true;
-export const scheduleMicrotask =
-  typeof queueMicrotask === "function"
-    ? queueMicrotask
-    : typeof localPromise !== "undefined"
-    ? (callback) =>
-        localPromise.resolve(null).then(callback).catch(handleErrorInNextTick)
-    : scheduleTimeout; // TODO: Determine the best fallback here.
-```
+- 源碼有做兼容：
+  ```ts
+  // -------------------
+  //     Microtasks
+  // -------------------
+  export const supportsMicrotasks = true;
+  export const scheduleMicrotask =
+    typeof queueMicrotask === "function"
+      ? queueMicrotask
+      : typeof localPromise !== "undefined"
+      ? (callback) =>
+          localPromise.resolve(null).then(callback).catch(handleErrorInNextTick)
+      : scheduleTimeout; // TODO: Determine the best fallback here.
+  ```
 
 > [!TIP] 源碼筆記
 > [react-debugger/src/react/packages/react-reconciler/src/ReactFiberRootScheduler.js](./react-debugger/src/react/packages/react-reconciler/src/ReactFiberRootScheduler.js)
@@ -938,6 +991,7 @@ import { scheduleCallback, NormalPriority } from "@mono/scheduler";
 export function ensureRootIsScheduled(root: FiberRoot) {
   // ! window 的方法，加入微任務，會去執行 scheduler 包中的調度，確保在當次瀏覽器工作循環執行
   queueMicrotask(() => {
+    // 源碼中間有再調用其他函式
     scheduleTaskForRootDuringMicrotask(root);
   });
 }
@@ -991,9 +1045,12 @@ react-reconciler 是對 fiber 樹進行[深度優先遍歷(DFS)](./DFS.md)，
       2. 將變化應用到 DOM 或其他目標
       3. 執行副作用，如 `componentDidMount`、`useEffect` 的 `cleanup` 和 `setup`
 
+如果我們有一個 fiber 樹，那處理的順序會是這樣：
+在紅色是在 `completeWork` 循環執行創建真實 DOM，直到有 sibling，或是子節點再回到 `beginWork` 創建 fiber，最後回到根節點上。
+![preformConcurrentWorkOnRoot](./assets/preformConcurrentWorkOnRoot.png)
+
 > [!TIP] 詳見隔壁頁筆記：
-> [源碼當中的 renderRootConcurrent 和 renderRootSync](./react%20工作流程.md)
-> [源碼當中的 commit 階段](./react%20工作流程.md)
+> [源碼當中的 renderRootConcurrent 和 renderRootSync](./react%20工作流程.md) > [源碼當中的 commit 階段](./react%20工作流程.md)
 
 #### 先處理 beginWork
 
@@ -1001,6 +1058,7 @@ react-reconciler 是對 fiber 樹進行[深度優先遍歷(DFS)](./DFS.md)，
 
 ```ts
 export function preformConcurrentWorkOnRoot(root: FiberRoot) {
+  // 在源碼當中，初次渲染調用的是 renderRootSync
   // ! 1. render: 構建 fiber 樹(VDOM)
   renderRootSync(root);
   // ! TODO: 2. commit: VDOM -> DOM
@@ -1015,7 +1073,14 @@ function renderRootSync(root: FiberRoot) {
   executionContext |= RenderContext;
 
   // ! 2. 初始化數據，準備好 WorkInProgress 樹
-  prepareFreshStack(root);
+  // 源碼還有判斷 lanes 優先級的改變
+  // react-debugger/src/react/packages/react-reconciler/src/ReactFiberWorkLoop.js
+  // if (workInProgressRoot !== root || workInProgressRootRenderLanes !== lanes) {
+  // root 改變時，才會建立一顆新的 workInProgress 樹
+  // 用戶觸發了更高優先級的更新，原先的 root 會被丟棄 或是 用戶調度了 createRoot 或是 render，改了樹
+  if (workInProgressRoot !== root) {
+    prepareFreshStack(root);
+  }
 
   // ! 3. 遍歷構建 fiber 樹，深度優先遍歷
   workLoopSync();
@@ -1059,6 +1124,7 @@ function workLoopSync() {
 ```ts
 function performUnitOfWork(unitOfWork: Fiber) {
   // 對應的 老的 current 節點
+  // 如果是初始渲染，只有一棵樹時，在createWorkInProgress當中root指向自己
   const current = unitOfWork.alternate;
   // 1. beginWork，返回子節點
   let next = beginWork(current, unitOfWork);
@@ -1104,8 +1170,7 @@ export function beginWork(
   throw new Error(`beginWork 有標籤沒有處理到 - ${workInProgress.tag}`);
 }
 // 根 fiber 節點，所需要做的只是，協調子節點
-function updateHostRoot(current: Fiber | null, workInProgress: Fiber) {
-  // ? current 沒有 那？？ nextChildren 怎麼會有
+function updateHostRoot(current: Fiber | null, workInProgress: Fiber)
   const nextChildren = current?.memoizedState.element;
   reconcileChildren(current, workInProgress, nextChildren);
   return workInProgress.child;
@@ -1375,7 +1440,8 @@ function commitRoot(root: FiberRoot) {
   executionContext |= CommitContext;
   // ! 2. mutation 階段，渲染 DOM 樹
   commitMutationEffects(root, root.finishedWork);
-
+  // ! 3. 將完成的新樹賦值成為當前樹
+  root.current = root.finishedWork as Fiber;
   // ! 4. commit 結束，把數據還原
   executionContext = prevExecutionContext;
   workInProgressRoot = null;
@@ -3986,8 +4052,10 @@ function commitRoot(root: FiberRoot) {
   const prevExecutionContext = executionContext;
   executionContext |= CommitContext;
   // ! 2.1 mutation 階段，遍歷 fiber，渲染 DOM 樹
-  // useLayoutEffect 也應當在這個階段執行
   commitMutationEffects(root, root.finishedWork as Fiber);
+  // ! 2.1.1 將完成的新樹賦值成為當前樹
+  root.current = root.finishedWork as Fiber;
+  // 源碼中 有另外處理 commitLayoutEffects，useLayoutEffect 也應當在這個階段2.1.1後執行
   // ! 2.2 passive effect 階段，執行 passive effect 階段
   // 這也是為什麼 useEffect 延遲調用的原因
   scheduleCallback(NormalPriority, () => {

@@ -22,7 +22,7 @@ import {
   isSimpleFunctionComponent,
 } from "./ReactFiber";
 // 處理當前的節點，因應不同節點做不同的處理
-// 返回子節點
+// 返回子節點，return null 就是 沒有子節點
 export function beginWork(
   current: Fiber | null,
   workInProgress: Fiber
