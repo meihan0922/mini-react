@@ -66,7 +66,7 @@ export function completeWork(
     }
     // TODO: 其他組件標籤 之後再說
   }
-  throw new Error("不知名的 work tag");
+  throw new Error(`不知名的 work tag - ${workInProgress.tag}`);
 }
 
 function updateHostComponent(
@@ -86,7 +86,9 @@ function updateHostComponent(
     );
   }
 }
-// 初始化屬性 || 更新屬性，prevProps和nextProps的dom指向一樣的
+// 初始化屬性 || 更新屬性，prevProps 和 nextProps 的dom指向一樣的
+// 兩次迴圈，先處理 prevProps 賦值和移除
+// 再處理 nextProps 賦值
 function finalizeInitialChildren(
   domElement: Element,
   prevProps: any,
@@ -138,6 +140,8 @@ function finalizeInitialChildren(
   }
 }
 
+// 要把整個子節點添加到 workInProgress.stateNode 上
+// 源碼中，這裡也會處理 isHidden
 function appendAllChildren(parent: Element, workInProgress: Fiber) {
   let node = workInProgress.child;
   while (node !== null) {
@@ -151,7 +155,7 @@ function appendAllChildren(parent: Element, workInProgress: Fiber) {
     }
     if (node === workInProgress) return;
 
-    // 同層級結束
+    // 子節點的同層級結束，子節點已經沒有後面的兄弟節點了
     while (node.sibling === null) {
       // 如果是根節點，或是已經處理完整個子樹了
       if (node.return === null || node.return === workInProgress) {

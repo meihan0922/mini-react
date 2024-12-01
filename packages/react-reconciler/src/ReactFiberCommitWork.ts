@@ -28,8 +28,10 @@ function recursivelyTraverseMutationEffects(root, parentFiber: Fiber) {
 function commitReconciliationEffects(finishedWork: Fiber) {
   // TODO 只先完成 Placement ChildDeletion
   const flags = finishedWork.flags;
+  // 頁面初次渲染，updateHostRoot 有走到 placeSingleChild，flags 有被打上 Placement
+  // 新增插入位移都是 Placement
   if (flags & Placement) {
-    // 頁面初次渲染，新增插入 appendChild
+    // 新增插入 appendChild
     commitPlacement(finishedWork);
     // 把 Placement 從 flags 移除
     finishedWork.flags &= ~Placement;
@@ -79,12 +81,15 @@ function commitDeletions(
 
 function commitPlacement(finishedWork: Fiber) {
   // 目前先把 HostComponent 渲染上去，之後再處理其他組件的情況
+  // 只有 HostComponent/HostText/HostRoot 有實體的節點的，可以進行 DOM 操作
   if (finishedWork.stateNode && isHost(finishedWork)) {
     const domNode = finishedWork.stateNode;
+    // HostText 沒有子節點，它的內容文字只會做為 props 掛上 fiber
     const parentFiber = getHostParentFiber(finishedWork);
     // 要找到最接近的祖先節點 是 Host 的 fiber，再把他塞進去
     // Host 節點有三種 HostRoot, HostComponent, HostText(不能有子節點)
     let parentDOM = parentFiber.stateNode;
+    // 如果父節點就是根節點的話，掛載到 HostRoot 的實例 實例上
     // HostRoot 的實例存在 containerInfo 中
     if (parentDOM.containerInfo) {
       parentDOM = parentDOM.containerInfo;

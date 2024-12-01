@@ -404,6 +404,7 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
     currentFirstChild: Fiber | null,
     newChild: any
   ) {
+    // 先判斷是否就是文本節點，或是單節點而已
     if (isText(newChild)) {
       return placeSingleChild(
         reconcileSingleTextNode(returnFiber, currentFirstChild, newChild)

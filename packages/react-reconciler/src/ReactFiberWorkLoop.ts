@@ -156,7 +156,7 @@ function completeUnitOfWork(unitOfWork: Fiber) {
     const current = completedWork.alternate;
     const returnFiber = completedWork.return;
 
-    // 依照不同的節點 tag 生成節點，如果是函式組件也可能 還有子節點等等
+    // 依照不同的節點 tag 生成節點
     // 如果自身處理完成，返回null
     // 並且看有沒有兄弟節點，沒有則返回父節點，再處理父節點的兄弟節點
     let next = completeWork(current, completedWork);

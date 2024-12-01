@@ -320,7 +320,7 @@ react element 上，不同的標籤，生成不同屬性的 fiber。其他相關
 
 當需要進行渲染時，從根節點開始逐一更新每一個節點，每更新一個 fiber 之後，js 得以檢查是否有優先級更高、需要快速響應的任務（優先順序在 lanes) ，依照優先權判定要中斷 fiber 處理，時間切片任務在執行結束後主動釋放主執行緒給瀏覽器。
 
-在新渲染時，會產生一個新的樹(workInProgress tree)，原先的樹會變成舊的樹(current tree)，fiber 之間如果是可以復用的話，會通過 alternate 指向彼此（後續再說）
+在新渲染時，會產生一個新的樹(workInProgress tree)，原先的樹會變成舊的樹(current tree)，fiber 會通過 alternate 指向彼此（後續再說）
 
 > [!TIP] 源碼筆記
 > [react-debugger/src/react/packages/react-reconciler/src/ReactInternalTypes.js](./react-debugger/src/react/packages/react-reconciler/src/ReactInternalTypes.js) > [react-debugger/src/react/packages/react-reconciler/src/ReactWorkTags.js](./react-debugger/src/react/packages/react-reconciler/src/ReactWorkTags.js)
@@ -1179,7 +1179,7 @@ function updateHostRoot(current: Fiber | null, workInProgress: Fiber)
 // TODO: 更新
 function updateHostComponent(current: Fiber | null, workInProgress: Fiber) {
   const { type, pendingProps } = workInProgress;
-  // 如果原生標籤只有一個文本，這個時候文本不會再生成 fiber 節點，而是會變成原生標籤的屬性
+  // 如果原生標籤只有一個文本，這個時候文本不會再生成 fiber 節點，而是會變成原生標籤的屬性，會回傳 null
   const isDirectTextChild = shouldSetTextContent(type, pendingProps);
   if (isDirectTextChild) {
     return null;
@@ -1196,17 +1196,35 @@ function reconcileChildren(
   workInProgress: Fiber,
   nextChildren: any
 ) {
-  // 初次渲染
+  // 初次渲染，除了根節點以外的其他節點
   if (current === null) {
     workInProgress.child = mountChildFibers(workInProgress, null, nextChildren);
   } else {
     // 初次渲染根節點會走到這裡，會在根fiber打上更新的標記
+    // div#root 建立過 根Fiber, tag = HostRoot = 3
     workInProgress.child = reconcileChildFibers(
       workInProgress,
       current.child,
       nextChildren
     );
   }
+}
+```
+
+> packages/react-dom/client/ReactDOMHostConfig.ts
+
+```ts
+// 文本節點的判斷條件
+export function shouldSetTextContent(type: string, props: any): boolean {
+  return (
+    type === "textarea" ||
+    type === "noscript" ||
+    typeof props.children === "string" ||
+    typeof props.children === "number" ||
+    (typeof props.dangerouslySetInnerHTML === "object" &&
+      props.dangerouslySetInnerHTML !== null &&
+      props.dangerouslySetInnerHTML.__html != null)
+  );
 }
 ```
 
@@ -1242,10 +1260,12 @@ export const reconcileChildFibers: ChildReconciler =
 
 export const mountChildFibers: ChildReconciler = createChildReconciler(false);
 
-// 協調子節點
+// 協調"子"節點
+// wrapper
 function createChildReconciler(shouldTrackSideEffect: boolean) {
   // 給 fiber 添加標記，flag，這邊會影響到之後 commit
   function placeSingleChild(newFiber: Fiber) {
+    // 走更新，而且 new fiber alternate 是沒有指向老節點，是一個全新的節點，打上標記
     if (shouldTrackSideEffect && newFiber.alternate) {
       newFiber.flags |= Placement;
     }
@@ -1258,6 +1278,7 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
     currentFirstChild: Fiber | null,
     newChild: ReactElement
   ) {
+    // TODO: 復用還沒寫
     let createFiber = createFiberFromElement(newChild);
     createFiber.return = returnFiber;
     return createFiber;
@@ -1448,14 +1469,14 @@ function commitRoot(root: FiberRoot) {
 }
 ```
 
-創建完 VDOM 要想辦法渲染在真實的 DOM 上，要逐一遍歷，使用遞迴
+創建完 VDOM 要想辦法渲染在真實的 DOM 上，已經回到根節點了，但要從最 要逐一遍歷，使用遞迴
 
 > react-reconciler/src/ReactFiberCommitWork.ts
 
 ```ts
 // finishedWork 是 HostRoot 類型的 fiber，要把子節點渲染到 root 裡面，root 是 #root
 export function commitMutationEffects(root: FiberRoot, finishedWork: Fiber) {
-  // 遍歷子節點和兄弟節點
+  // 遞迴處理子節點和兄弟節點
   recursivelyTraverseMutationEffects(root, finishedWork);
   // 根據flags做相對應的操作，比方在父節點 appendChild
   commitReconciliationEffects(finishedWork);
@@ -1514,6 +1535,13 @@ function isHostParent(fiber: Fiber) {
 ```
 
 看 react 建立的結果，此時最簡單的 jsx 已經出現在畫面上了。
+
+##### 可以看到 `completeWork` 和 `commitMutationEffects` 中，都有用到 `appendChild`，他們有什麼不同？為什麼 `completeWork` 要去操作虛擬 DOM?
+
+- `completeWork`: 將生成對應的實例掛載到 `workInProgress.stateNode`，操作內存中虛擬 DOM 樹，要為提交階段做準備！也方便中斷，並恢復後繼續處理樹。
+- `commitMutationEffects`: 操作到真實的 DOM！所以遞歸一次處理完成。雖然看起來是每個節點都走了一輪！但是要注意的是，他是依照標籤在處理節點。比方說函式組件被標記 `Placement` ，它的子節點都會去遍歷，如果只是單純的原生標籤，就會快速的略過，在回到函式組件時，偵測到 `Placement` ，因此向上尋找最近的原生標籤，真實 DOM `append` 進去已經生成好的函式組件的 stateNode。
+
+透過分離內存操作和真實 DOM 操作，實現了高效的更新機制。
 
 ## 補充各種節點渲染
 

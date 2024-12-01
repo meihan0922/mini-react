@@ -237,6 +237,7 @@ function reconcileChildren(
     workInProgress.child = mountChildFibers(workInProgress, null, nextChildren);
   } else {
     // 初次渲染根節點會走到這裡
+    // div#root 建立過 根Fiber, tag = HostRoot = 3
     workInProgress.child = reconcileChildFibers(
       workInProgress,
       current.child,
