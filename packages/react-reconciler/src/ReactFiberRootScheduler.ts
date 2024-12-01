@@ -1,4 +1,4 @@
-import { preformConcurrentWorkOnRoot } from "./ReactFiberWorkLoop";
+import { performConcurrentWorkOnRoot } from "./ReactFiberWorkLoop";
 import type { FiberRoot } from "./ReactInternalTypes";
 
 import {
@@ -20,6 +20,6 @@ export function scheduleTaskForRootDuringMicrotask(root: FiberRoot) {
   // 這裡是入口
   scheduleCallback(
     NormalPriority,
-    preformConcurrentWorkOnRoot.bind(null, root)
+    performConcurrentWorkOnRoot.bind(null, root)
   );
 }

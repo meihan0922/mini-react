@@ -192,18 +192,18 @@ function updateHostText() {
 // 根 fiber 節點，所需要做的只是，協調子節點
 function updateHostRoot(current: Fiber | null, workInProgress: Fiber) {
   const nextChildren = current?.memoizedState.element;
-  console.log(
-    "%c [ nextChildren ]: ",
-    "color: #bf2c9f; background: pink; font-size: 13px;",
-    nextChildren
-  );
-  debugger;
+  // console.log(
+  //   "%cpackages/react-reconciler/src/ReactFiberBeginWork.ts:195 current",
+  //   "color: #007acc;",
+  //   current
+  // );
+  // console.log(
+  //   "%c [ nextChildren ]: ",
+  //   "color: #bf2c9f; background: pink; font-size: 13px;",
+  //   nextChildren
+  // );
   reconcileChildren(current, workInProgress, nextChildren);
-  // 如果是更新階段，走到此，表示整棵樹都要更新，
-  // 協調子節點完成後，舊的子節點，更新成新的子節點
-  if (current) {
-    current.child = workInProgress.child;
-  }
+
   return workInProgress.child;
 }
 // 原生標籤，ex: div, span。初次渲染會進入協調，更新則可能是協調或是 bailout

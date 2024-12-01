@@ -143,7 +143,7 @@ function dispatchReducerAction<S, I, A>(
   action?: any
 ) {
   hook.memorizedState = reducer ? reducer(hook.memorizedState, action) : action;
-  fiber.alternate = { ...fiber };
+  // fiber.alternate = { ...fiber };
   const root = getRootForUpdateFiber(fiber);
   scheduleUpdateOnFiber(root, fiber);
 }

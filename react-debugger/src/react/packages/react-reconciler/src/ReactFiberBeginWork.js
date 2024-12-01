@@ -1397,9 +1397,9 @@ function updateHostRoot(current, workInProgress, renderLanes) {
   const nextProps = workInProgress.pendingProps;
   const prevState = workInProgress.memoizedState;
   const prevChildren = prevState.element;
-  // ! 1. clone 放入 workInProgress
+  // ! 1. clone UpdateQueue 放入 workInProgress
   cloneUpdateQueue(current, workInProgress);
-  // ! 處理pending update，把他們轉移到 baseQueue，計算出最終的 state
+  // ! 處理 pending update，把他們轉移到 baseQueue，計算出最終的 state
   processUpdateQueue(workInProgress, nextProps, null, renderLanes);
 
   const nextState = workInProgress.memoizedState;

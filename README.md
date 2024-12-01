@@ -13,9 +13,9 @@
     - [ensureRootIsScheduled -\> scheduleTaskForRootDuringMicrotask ，確保在當次瀏覽器工作循環執行啟動 scheduler 包中的調度](#ensurerootisscheduled---scheduletaskforrootduringmicrotask-確保在當次瀏覽器工作循環執行啟動-scheduler-包中的調度)
     - [react-reconciler workLoop](#react-reconciler-workloop)
       - [先處理 beginWork](#先處理-beginwork)
-      - [第一階段 workLoopSync -\> performUnitOfWork()：兩階段 beginWork, completeUnitWork](#第一階段-workloopsync---performunitofwork兩階段-beginwork-completeunitwork)
+      - [第一階段 workLoopSync -\> performUnitOfWork()：兩階段 beginWork, completeUnitOfWork](#第一階段-workloopsync---performunitofwork兩階段-beginwork-completeUnitOfWork)
         - [beginWork - 建立 fiber 結構](#beginwork---建立-fiber-結構)
-        - [completeUnitWork - 深度優先遍歷，按照 fiber tag 建立真實 DOM](#completeunitwork---深度優先遍歷按照-fiber-tag-建立真實-dom)
+        - [completeUnitOfWork - 深度優先遍歷，按照 fiber tag 建立真實 DOM](#completeUnitOfWork---深度優先遍歷按照-fiber-tag-建立真實-dom)
           - [看 fiber 建立的結果](#看-fiber-建立的結果)
       - [第二階段 commit: VDOM -\> DOM](#第二階段-commit-vdom---dom)
   - [補充各種節點渲染](#補充各種節點渲染)
@@ -984,7 +984,7 @@ export function scheduleUpdateOnFiber(root: FiberRoot, fiber: Fiber) {
 手寫： @mono/react-reconciler/src/ReactFiberRootScheduler.ts
 
 ```ts
-import { preformConcurrentWorkOnRoot } from "./ReactFiberWorkLoop";
+import { performConcurrentWorkOnRoot } from "./ReactFiberWorkLoop";
 import { FiberRoot } from "./ReactInternalTypes";
 import { scheduleCallback, NormalPriority } from "@mono/scheduler";
 
@@ -998,17 +998,17 @@ export function ensureRootIsScheduled(root: FiberRoot) {
 
 // 調度
 export function scheduleTaskForRootDuringMicrotask(root: FiberRoot) {
-  // 入口，啟動 scheduler 將 preformConcurrentWorkOnRoot 排入宏任務中
+  // 入口，啟動 scheduler 將 performConcurrentWorkOnRoot 排入宏任務中
   scheduleCallback(
     NormalPriority,
-    preformConcurrentWorkOnRoot.bind(null, root)
+    performConcurrentWorkOnRoot.bind(null, root)
   );
 }
 ```
 
 ### react-reconciler workLoop
 
-`preformConcurrentWorkOnRoot` 被加入宏任務中，在這個時間切片當中，要處理 fiber 樹的創建。
+`performConcurrentWorkOnRoot` 被加入宏任務中，在這個時間切片當中，要處理 fiber 樹的創建。
 先簡單介紹下 react-reconciler。
 從此開始進入 fiber 的創建，也就是建立虛擬 DOM。
 
@@ -1028,8 +1028,8 @@ react-reconciler 是對 fiber 樹進行[深度優先遍歷(DFS)](./DFS.md)，
      1. beginWork: 按照 workInProgress tag，執行子節點的 fiber 創建
         - 看有沒有要走 diff，走到 bailout
         - 沒有子節點則停止，返回子節點（深度優先，一路執行 child)
-     2. completeUnitWork: 循環執行創建真實 DOM
-        - 把 workInProgress 轉移指針到同層級的兄弟節點，回到 beginWork，直到所有兄弟節點與其子節點都完成，這時指針轉移到父節點上，因為此時的父節點已經執行過 beginWork，不需要跳出 completeUnitWork 的迴圈，執行 DOM 創建之餘，把所有有 stateNode 的子節點（需要略過 Fragment、child === null）全部 appendAllChildren 到父節點 stateNode 中。以上 重複直到根節點。
+     2. completeUnitOfWork: 循環執行創建真實 DOM
+        - 把 workInProgress 轉移指針到同層級的兄弟節點，回到 beginWork，直到所有兄弟節點與其子節點都完成，這時指針轉移到父節點上，因為此時的父節點已經執行過 beginWork，不需要跳出 completeUnitOfWork 的迴圈，執行 DOM 創建之餘，把所有有 stateNode 的子節點（需要略過 Fragment、child === null）全部 appendAllChildren 到父節點 stateNode 中。以上 重複直到根節點。
   1. commit: VDOM -> DOM
 
 - 🌟 需要注意的是：
@@ -1047,7 +1047,7 @@ react-reconciler 是對 fiber 樹進行[深度優先遍歷(DFS)](./DFS.md)，
 
 如果我們有一個 fiber 樹，那處理的順序會是這樣：
 在紅色是在 `completeWork` 循環執行創建真實 DOM，直到有 sibling，或是子節點再回到 `beginWork` 創建 fiber，最後回到根節點上。
-![preformConcurrentWorkOnRoot](./assets/preformConcurrentWorkOnRoot.png)
+![performConcurrentWorkOnRoot](./assets/performConcurrentWorkOnRoot.png)
 
 > [!TIP] 詳見隔壁頁筆記：
 > [源碼當中的 renderRootConcurrent 和 renderRootSync](./react%20工作流程.md) > [源碼當中的 commit 階段](./react%20工作流程.md)
@@ -1057,7 +1057,7 @@ react-reconciler 是對 fiber 樹進行[深度優先遍歷(DFS)](./DFS.md)，
 > react-reconciler/src/ReactFiberWorkLoop.ts
 
 ```ts
-export function preformConcurrentWorkOnRoot(root: FiberRoot) {
+export function performConcurrentWorkOnRoot(root: FiberRoot) {
   // 在源碼當中，初次渲染調用的是 renderRootSync
   // ! 1. render: 構建 fiber 樹(VDOM)
   renderRootSync(root);
@@ -1110,7 +1110,7 @@ function workLoopSync() {
 }
 ```
 
-#### 第一階段 workLoopSync -> performUnitOfWork()：兩階段 beginWork, completeUnitWork
+#### 第一階段 workLoopSync -> performUnitOfWork()：兩階段 beginWork, completeUnitOfWork
 
 1. beginWork: 執行子節點的 fiber 創建
 
@@ -1118,8 +1118,8 @@ function workLoopSync() {
    2. 看有沒有要走 diff，比方類組件 shouldComponentUpdate 比較後走到 bailout,
    3. 返回子節點也就是葉子節點（深度優先，一路執行 child)
 
-2. 沒有子節點則執行 completeUnitWork: 循環執行創建真實 DOM
-   ，並且把 workInProgress 轉移指針到同層級的兄弟節點，回到 beginWork，直到所有兄弟節點與其子節點都完成，這時指針轉移到父節點上，因為已經執行過 beginWork，不需要跳出 completeUnitWork 的迴圈，執行 DOM 創建之餘，把所有有 stateNode 的子節點（需要略過 Fragment、child === null）全部 appendAllChildren 到父節點 stateNode 中。以上 重複直到根節點。
+2. 沒有子節點則執行 completeUnitOfWork: 循環執行創建真實 DOM
+   ，並且把 workInProgress 轉移指針到同層級的兄弟節點，回到 beginWork，直到所有兄弟節點與其子節點都完成，這時指針轉移到父節點上，因為已經執行過 beginWork，不需要跳出 completeUnitOfWork 的迴圈，執行 DOM 創建之餘，把所有有 stateNode 的子節點（需要略過 Fragment、child === null）全部 appendAllChildren 到父節點 stateNode 中。以上 重複直到根節點。
 
 ```ts
 function performUnitOfWork(unitOfWork: Fiber) {
@@ -1131,7 +1131,7 @@ function performUnitOfWork(unitOfWork: Fiber) {
 
   // 沒有子節點了
   if (next === null) {
-    completeUnitWork(unitOfWork);
+    completeUnitOfWork(unitOfWork);
   } else {
     workInProgress = next;
   }
@@ -1285,13 +1285,13 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
 }
 ```
 
-##### completeUnitWork - 深度優先遍歷，按照 fiber tag 建立真實 DOM
+##### completeUnitOfWork - 深度優先遍歷，按照 fiber tag 建立真實 DOM
 
 > react-reconciler/src/ReactFiberWorkLoop.ts
 
 ```ts
 // 深度優先遍歷，子節點、兄弟節點、叔叔節點、爺爺節點....
-function completeUnitWork(unitOfWork: Fiber) {
+function completeUnitOfWork(unitOfWork: Fiber) {
   let completedWork: Fiber | null = unitOfWork;
 
   do {
@@ -1424,7 +1424,7 @@ createRoot(document.getElementById("root")!).render(jsx);
 > react-reconciler/src/ReactFiberWorkLoop.ts
 
 ```ts
-export function preformConcurrentWorkOnRoot(root: FiberRoot) {
+export function performConcurrentWorkOnRoot(root: FiberRoot) {
   // ! 1. render: 構建 fiber 樹(VDOM)
   renderRootSync(root);
   // ! 2. commit: VDOM -> DOM
@@ -1542,7 +1542,7 @@ createRoot(document.getElementById("root")!).render(jsx);
 
 #### 第一種: .render("xxx")
 
-渲染流程，進入 render workLoop `renderRootSync` - `workLoopSync` - `performUnitOfWork` - `beginWork` - `completeUnitWork`
+渲染流程，進入 render workLoop `renderRootSync` - `workLoopSync` - `performUnitOfWork` - `beginWork` - `completeUnitOfWork`
 
 ```js
 function performUnitOfWork(unitOfWork: Fiber) {
@@ -1552,7 +1552,7 @@ function performUnitOfWork(unitOfWork: Fiber) {
 
   // 沒有子節點了
   if (next === null) {
-    completeUnitWork(unitOfWork);
+    completeUnitOfWork(unitOfWork);
   } else {
     workInProgress = next;
   }
@@ -1622,7 +1622,7 @@ function isText(newChild: any) {
 }
 ```
 
-2. `completeUnitWork` - `completeWork` - `createChildReconciler`
+2. `completeUnitOfWork` - `completeWork` - `createChildReconciler`
 
 創建真實 DOM
 
@@ -1798,13 +1798,13 @@ export function beginWork(
       return updateHostRoot(current, workInProgress);
     case HostComponent:
       // 2. div
-      // 3. h1 -> completeUnitWork
-      // 4. h2 -> completeUnitWork
-      // 9. div -> completeUnitWork
+      // 3. h1 -> completeUnitOfWork
+      // 4. h2 -> completeUnitOfWork
+      // 9. div -> completeUnitOfWork
       return updateHostComponent(current, workInProgress);
     case HostText:
-      // 5. 123 -> completeUnitWork  -> 把 workInProgress 指向 Fragment 再次進入 beginWork
-      // 7. 11111 -> completeUnitWork
+      // 5. 123 -> completeUnitOfWork  -> 把 workInProgress 指向 Fragment 再次進入 beginWork
+      // 7. 11111 -> completeUnitOfWork
       return updateHostText();
     case Fragment:
       // 6. Fragment
@@ -1901,7 +1901,7 @@ export function createFiberFromTypeAndProps(
 }
 ```
 
-中間經過 completeUnitWork 轉移 workInProgress 指針，依序執行 h1, h2, 123，就不贅述，快轉到處理 Fragment，回到 `beginWork`，進入 `updateHostFragment` 後 - `reconcileChildren` - `reconcileChildFibers`
+中間經過 completeUnitOfWork 轉移 workInProgress 指針，依序執行 h1, h2, 123，就不贅述，快轉到處理 Fragment，回到 `beginWork`，進入 `updateHostFragment` 後 - `reconcileChildren` - `reconcileChildFibers`
 
 ```ts
 export function beginWork(
@@ -1941,7 +1941,7 @@ function reconcileChildFibers(
 }
 ```
 
-`reconcileChildrenArray` - `createChild` 一樣處理成 fiber 後，一樣處理 `newChild = {div 333}`，進入 `completeUnitWork` 完成創建 DOM，回到父節點 Fragment，
+`reconcileChildrenArray` - `createChild` 一樣處理成 fiber 後，一樣處理 `newChild = {div 333}`，進入 `completeUnitOfWork` 完成創建 DOM，回到父節點 Fragment，
 這時在 `completeWork` 中，因為 Fragment 是沒有實際 DOM 的，因此回傳 null
 
 ```ts
@@ -2592,8 +2592,6 @@ function dispatchReducerAction<S, I, A>(
 ) {
   hook.memorizedState = reducer ? reducer(hook.memorizedState, action) : action;
 
-  // 重複使用 fiber
-  fiber.alternate = { ...fiber };
   // 找到 HostRoot
   const root = getRootForUpdateFiber(fiber);
   scheduleUpdateOnFiber(root, fiber);
@@ -2631,7 +2629,14 @@ function renderRootSync(root: FiberRoot) {
   // 省略
 
   // ! 2. 初始化數據，準備好 WorkInProgress 樹
-  prepareFreshStack(root);
+  // 源碼還有判斷 lanes 優先級的改變
+  // react-debugger/src/react/packages/react-reconciler/src/ReactFiberWorkLoop.js
+  // if (workInProgressRoot !== root || workInProgressRootRenderLanes !== lanes) {
+  // root 改變時，才會建立一顆新的 workInProgress 樹
+  // 用戶觸發了更高優先級的更新，原先的 root 會被丟棄 或是 用戶調度了 createRoot 或是 render，改了樹
+  if (workInProgressRoot !== root) {
+    prepareFreshStack(root);
+  }
 
   // ! 3. 遍歷構建 fiber 樹，深度優先遍歷
   workLoopSync();
@@ -2646,10 +2651,7 @@ function prepareFreshStack(root: FiberRoot): Fiber {
   workInProgressRoot = root;
   const rootWorkInprogress = createWorkInProgress(root.current, null);
 
-  if (workInProgress === null) {
-    // 如果是初次渲染的話，workInProgress 才是從根 fiber 開始
-    workInProgress = rootWorkInprogress;
-  }
+  workInProgress = rootWorkInprogress;
 
   return rootWorkInprogress;
 }
@@ -2739,14 +2741,14 @@ function performUnitOfWork(unitOfWork: Fiber) {
   unitOfWork.memoizedProps = unitOfWork.pendingProps;
   // 沒有子節點了
   if (next === null) {
-    completeUnitWork(unitOfWork);
+    completeUnitOfWork(unitOfWork);
   } else {
     workInProgress = next;
   }
 }
 ```
 
-走到 `completeUnitWork`，要完成->如果是復用就要拿原本的，不要再次創建！
+走到 `completeUnitOfWork`，要完成->如果是復用就要拿原本的，不要再次創建！
 
 ```ts
 export function completeWork(
@@ -2866,11 +2868,7 @@ function finalizeInitialChildren(
 function updateHostRoot(current: Fiber | null, workInProgress: Fiber) {
   const nextChildren = current?.memoizedState.element;
   reconcileChildren(current, workInProgress, nextChildren);
-  // 如果是更新階段，走到此，表示整棵樹都要更新，
-  // 協調子節點完成後，舊的子節點，更新成新的子節點
-  if (current) {
-    current.child = workInProgress.child;
-  }
+
   return workInProgress.child;
 }
 ```

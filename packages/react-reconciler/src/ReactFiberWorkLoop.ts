@@ -50,16 +50,17 @@ export function scheduleUpdateOnFiber(root: FiberRoot, fiber: Fiber) {
    * 但因為目前還沒處理 lane 先忽略掉 1.
    **/
 
-  workInProgress = fiber;
+  // workInProgress = fiber;
   // TODO: setState 應該要走別的邏輯，暫時走這
   ensureRootIsScheduled(root);
 }
 
-export function preformConcurrentWorkOnRoot(root: FiberRoot) {
+export function performConcurrentWorkOnRoot(root: FiberRoot) {
   // ! 1. render: 構建 fiber 樹(VDOM)
   renderRootSync(root);
   // 新的根fiber
   const finishedWork = root.current.alternate;
+
   root.finishedWork = finishedWork;
   // ! 2. commit: VDOM -> DOM
   commitRoot(root);
@@ -79,7 +80,6 @@ function commitRoot(root: FiberRoot) {
   });
   // ! 2.1.1 將完成的新樹賦值成為當前樹
   root.current = root.finishedWork as Fiber;
-
   // ! 3. commit 結束，把數據還原
   executionContext = prevExecutionContext;
   workInProgressRoot = null;
@@ -99,7 +99,6 @@ function renderRootSync(root: FiberRoot) {
   if (workInProgressRoot !== root) {
     prepareFreshStack(root);
   }
-
   // ! 3. 遍歷構建 fiber 樹，深度優先遍歷
   workLoopSync();
 
@@ -113,14 +112,11 @@ function prepareFreshStack(root: FiberRoot): Fiber {
   root.finishedWork = null;
 
   workInProgressRoot = root;
-  const rootWorkInprogress = createWorkInProgress(root.current, null);
 
-  if (workInProgress === null) {
-    // 如果是初次渲染的話，workInProgress 才是從根 fiber 開始
-    workInProgress = rootWorkInprogress;
-  }
+  const rootWorkInProgress = createWorkInProgress(root.current, null);
+  workInProgress = rootWorkInProgress;
 
-  return rootWorkInprogress;
+  return rootWorkInProgress;
 }
 
 function workLoopSync() {
@@ -146,14 +142,14 @@ function performUnitOfWork(unitOfWork: Fiber) {
   unitOfWork.memoizedProps = unitOfWork.pendingProps;
   // 沒有子節點了
   if (next === null) {
-    completeUnitWork(unitOfWork);
+    completeUnitOfWork(unitOfWork);
   } else {
     workInProgress = next;
   }
 }
 
 // 深度優先遍歷，轉移workInProgress，子節點、兄弟節點、叔叔節點、爺爺節點....
-function completeUnitWork(unitOfWork: Fiber) {
+function completeUnitOfWork(unitOfWork: Fiber) {
   let completedWork: Fiber | null = unitOfWork;
 
   do {
