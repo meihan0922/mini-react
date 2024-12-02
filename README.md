@@ -452,6 +452,7 @@ export type Fiber = {|
   // eventually have a pair. There are cases when we can clean up pairs to save
   // memory if we need to.
   // 用於儲存更新前的 fiber，到更新的時候要比對新老 fiber用
+  // 如果可以復用才指向對應的節點，不然是null
   alternate: Fiber | null,
 |};
 ```
@@ -1506,15 +1507,26 @@ function commitReconciliationEffects(finishedWork: Fiber) {
 
 function commitPlacement(finishedWork: Fiber) {
   // 目前先把 HostComponent 渲染上去，之後再處理其他組件的情況
-  if (finishedWork.stateNode && finishedWork.tag === HostComponent) {
-    const domNode = finishedWork.stateNode;
-    const parentFiber = getHostParentFiber(finishedWork);
-    // 要找到最接近的祖先節點 是 Host 的 fiber，再把他塞進去
-    // Host 節點有三種 HostRoot, HostComponent, HostText(不能有子節點)
-    let parentDOM = parentFiber.stateNode;
-    // HostRoot 的實例存在 containerInfo 中
-    if (parentDOM.containerInfo) parentDOM = parentDOM.containerInfo;
-    parentDOM.appendChild(domNode);
+  // 要找到最接近的祖先節點 是 Host 的 fiber，再把他塞進去
+  const parentFiber = getHostParentFiber(finishedWork);
+  switch (parentFiber.tag) {
+    case HostComponent: {
+      const domNode = finishedWork.stateNode;
+      const parent = parentFiber.stateNode;
+      parent.appendChild(domNode);
+      break;
+    }
+    case HostRoot: {
+      const domNode = finishedWork.stateNode;
+      const parent = parentFiber.stateNode.containerInfo;
+      parent.appendChild(domNode);
+      break;
+    }
+    default:
+      throw new Error(
+        "Invalid host parent fiber. This error is likely caused by a bug " +
+          "in React. Please file an issue."
+      );
   }
 }
 
@@ -1675,19 +1687,6 @@ export function completeWork(
 
 再進入 commit 階段 `commitRoot` - `commitMutationEffects`-`commitPlacement`
 
-增加 commit parentDOM.appendChild 的判斷
-
-```js
-function commitPlacement(finishedWork: Fiber) {
-  if (
-    finishedWork.stateNode &&
-    (finishedWork.tag === HostComponent || finishedWork.tag === HostText)
-  ) {
-    // 省略
-  }
-}
-```
-
 就可以得到 文字節點 渲染在畫面上。
 
 #### 第二種: children fibers Array 中有文字節點
@@ -1796,7 +1795,7 @@ createRoot(document.getElementById("root")!).render(<>123</>);
 createRoot(document.getElementById("root")!).render(<Fragment>123</Fragment>);
 ```
 
-#### 第一種: 巢狀的 Framgment
+#### 巢狀的 Framgment/根節點就是 Fragment
 
 一樣流程進入 beginWork 轉換成 fiber，
 root 先 再來 `<div className="border">`，在`updateHostComponent`建立了四個子節點的 fiber（h1-h2-textNode-Fragment)，並且返回 h1 fiber，依次執行，直到 Fragment
@@ -2057,31 +2056,111 @@ export function isHost(fiber: Fiber) {
 ```
 
 最後進入 commit 階段，遍歷 FiberRoot 添加到 parentDOM 中
-
-#### 第二種: 根節點就是 Fragment
-
-在 commit 時，會找根節點 appendChild，要是根節點是 Fragment，會沒有 stateNode
+為了避免巢狀的 Fragment 結構，在根節點時，要遞歸直到 child === null。
 
 ```ts
 function commitPlacement(finishedWork: Fiber) {
-  // 目前先把 HostComponent 渲染上去，之後再處理其他組件的情況
-  if (finishedWork.stateNode && isHost(finishedWork)) {
-    const domNode = finishedWork.stateNode;
-    const parentFiber = getHostParentFiber(finishedWork);
-    // 要找到最接近的祖先節點 是 Host 的 fiber，再把他塞進去
-    // Host 節點有三種 HostRoot, HostComponent, HostText(不能有子節點)
-    let parentDOM = parentFiber.stateNode;
-    // HostRoot 的實例存在 containerInfo 中
-    if (parentDOM.containerInfo) parentDOM = parentDOM.containerInfo;
-    parentDOM.appendChild(domNode);
+  // 源碼位置：react-debugger/src/react/packages/react-reconciler/src/ReactFiberCommitWork.js
+  // 要找到最接近的祖先節點 是 Host 的 fiber，再把他塞進去
+  const parentFiber = getHostParentFiber(finishedWork);
+  switch (parentFiber.tag) {
+    case HostComponent: {
+      const parent = parentFiber.stateNode;
+      const before = getHostSibling(finishedWork);
+      insertOrAppendPlacementNode(finishedWork, before, parent);
+      break;
+    }
+    case HostRoot: {
+      const parent = parentFiber.stateNode.containerInfo;
+      const before = getHostSibling(finishedWork);
+      insertOrAppendPlacementNodeIntoContainer(finishedWork, before, parent);
+      break;
+    }
+    default:
+      throw new Error(
+        "Invalid host parent fiber. This error is likely caused by a bug " +
+          "in React. Please file an issue."
+      );
+  }
+}
+
+function insertOrAppendPlacementNodeIntoContainer(
+  node: Fiber,
+  before: Element,
+  parent: Element
+) {
+  const { tag } = node;
+  const isHost = tag === HostComponent || tag === HostText;
+  if (isHost) {
+    const stateNode = node.stateNode;
+    if (before) {
+      // 源碼還有調用 insertInContainerBefore(parent, stateNode, before); 來排除 COMMENT 節點的狀況
+      parent.insertBefore(stateNode, before);
+    } else {
+      // 源碼還有調用 appendChildToContainer(parent, stateNode); 來排除 COMMENT 節點的狀況
+      parent.appendChild(stateNode);
+    }
   } else {
-    // 要是根節點是 Fragment，會沒有stateNode
-    let child = finishedWork.child;
-    while (child !== null) {
-      // 要是實際的節點
-      commitPlacement(child);
-      // 一樣處理完子樹後處理兄弟節點
-      child = child.sibling;
+    const child = node.child;
+    if (child !== null) {
+      insertOrAppendPlacementNodeIntoContainer(child, before, parent);
+      let sibling = child.sibling;
+      while (sibling !== null) {
+        insertOrAppendPlacementNodeIntoContainer(sibling, before, parent);
+        sibling = sibling.sibling;
+      }
+    }
+  }
+}
+
+function insertOrAppendPlacementNode(
+  node: Fiber,
+  before: Element,
+  parent: Element
+) {
+  if (before) {
+    parent.insertBefore(getStateNode(node), before);
+  } else {
+    parent.appendChild(getStateNode(node));
+  }
+}
+```
+
+創造 `getHostSibling()`，遍歷 fiber 尋找 finishedWork 兄弟節點，並且 這個 sibling 有 dom 節點，且是更新的節點，在本輪不發生移動
+
+```ts
+function getHostSibling(fiber: Fiber) {
+  let node = fiber;
+  siblings: while (1) {
+    // 往上找，找到有兄弟節點的節點
+    while (node.sibling === null) {
+      if (node.return === null || isHostParent(node.return)) {
+        return null;
+      }
+      node = node.return;
+    }
+    // 改到兄弟節點上
+    node = node.sibling;
+    // 往下找，找到是 tag 是 Host 節點
+    // 而且不能是本次更新中
+    // ❌ 被標記更新的節點
+    // ❌ 沒有子節點的節點
+    while (!isHost(node)) {
+      // 要馬是初次渲染，新增插入或是移動位置
+      if (node.flags & Placement) {
+        continue siblings;
+      }
+      // 沒有子節點
+      if (node.child === null) {
+        continue siblings;
+      } else {
+        node = node.child;
+      }
+    }
+    // 找到沒有位移的節點
+    // 有 stateNode ，是HostComponent | HostText
+    if (!(node.flags & Placement)) {
+      return node.stateNode;
     }
   }
 }
@@ -3494,101 +3573,6 @@ function placeChild(
     // flags 標記上 更新
     newFiber.flags |= Placement;
     return lastPlacedIndex;
-  }
-}
-```
-
-#### fiber 完成後，進入 commit，補插入節點邏輯
-
-在全部的 fiber 都被整理過後，進入 commit 階段，但當時只有寫
-Append node，應該要寫個判斷說
-
-之前的寫法，要改寫 `// !!!!` 的區塊
-
-```ts
-function commitPlacement(finishedWork: Fiber) {
-  // 目前先把 HostComponent 渲染上去，之後再處理其他組件的情況
-  if (finishedWork.stateNode && isHost(finishedWork)) {
-    const domNode = finishedWork.stateNode;
-    const parentFiber = getHostParentFiber(finishedWork);
-    // 要找到最接近的祖先節點 是 Host 的 fiber，再把他塞進去
-    // Host 節點有三種 HostRoot, HostComponent, HostText(不能有子節點)
-    let parentDOM = parentFiber.stateNode;
-    // HostRoot 的實例存在 containerInfo 中
-    if (parentDOM.containerInfo) {
-      parentDOM = parentDOM.containerInfo;
-    }
-    // !!!! 這段，所以不管怎樣所有的 fiber 都會插入在 parentDOM 裡的最後
-    // if (isHostParent(parentFiber)) {
-    //   parentDOM.appendChild(domNode);
-    // }
-
-    // 遍歷 fiber 尋找 finishedWork 兄弟節點，並且 這個 sibling 有 dom 節點，且是更新的節點
-    // 在本輪不發生移動
-    const before = getHostSibling(finishedWork);
-    insertOrAppendPlacementNode(finishedWork, before, parentDOM);
-  } else {
-    // 要是根節點是 Fragment，會沒有stateNode
-    let child = finishedWork.child;
-    while (child !== null) {
-      commitPlacement(child);
-      child = child.sibling;
-    }
-  }
-}
-```
-
-```ts
-function insertOrAppendPlacementNode(
-  node: Fiber,
-  before: Element,
-  parent: Element
-) {
-  if (before) {
-    // insertBefore(newNode, referenceNode)
-    parent.insertBefore(getStateNode(node), before);
-  } else {
-    parent.appendChild(getStateNode(node));
-  }
-}
-```
-
-創造 `getHostSibling()`，遍歷 fiber 尋找 finishedWork 兄弟節點，並且 這個 sibling 有 dom 節點，且是更新的節點，在本輪不發生移動
-
-```ts
-function getHostSibling(fiber: Fiber) {
-  let node = fiber;
-  siblings: while (1) {
-    // 往上找，找到有兄弟節點的節點
-    while (node.sibling === null) {
-      if (node.return === null || isHostParent(node.return)) {
-        return null;
-      }
-      node = node.return;
-    }
-    // 改到兄弟節點上
-    node = node.sibling;
-    // 往下找，找到是 tag 是 Host 節點
-    // 而且不能是本次更新中
-    // ❌ 被標記更新的節點
-    // ❌ 沒有子節點的節點
-    while (!isHost(node)) {
-      // 要馬是初次渲染，新增插入或是移動位置
-      if (node.flags & Placement) {
-        continue siblings;
-      }
-      // 沒有子節點
-      if (node.child === null) {
-        continue siblings;
-      } else {
-        node = node.child;
-      }
-    }
-    // 找到沒有位移的節點
-    // 有 stateNode ，是HostComponent | HostText
-    if (!(node.flags & Placement)) {
-      return node.stateNode;
-    }
   }
 }
 ```

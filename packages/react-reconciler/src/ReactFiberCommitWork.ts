@@ -79,33 +79,57 @@ function commitDeletions(
   });
 }
 
-function commitPlacement(finishedWork: Fiber) {
-  // 目前先把 HostComponent 渲染上去，之後再處理其他組件的情況
-  // 只有 HostComponent/HostText/HostRoot 有實體的節點的，可以進行 DOM 操作
-  if (finishedWork.stateNode && isHost(finishedWork)) {
-    const domNode = finishedWork.stateNode;
-    // HostText 沒有子節點，它的內容文字只會做為 props 掛上 fiber
-    const parentFiber = getHostParentFiber(finishedWork);
-    // 要找到最接近的祖先節點 是 Host 的 fiber，再把他塞進去
-    // Host 節點有三種 HostRoot, HostComponent, HostText(不能有子節點)
-    let parentDOM = parentFiber.stateNode;
-    // 如果父節點就是根節點的話，掛載到 HostRoot 的實例 實例上
-    // HostRoot 的實例存在 containerInfo 中
-    if (parentDOM.containerInfo) {
-      parentDOM = parentDOM.containerInfo;
+function insertOrAppendPlacementNodeIntoContainer(
+  node: Fiber,
+  before: Element,
+  parent: Element
+) {
+  const { tag } = node;
+  const isHost = tag === HostComponent || tag === HostText;
+  if (isHost) {
+    const stateNode = node.stateNode;
+    if (before) {
+      // 源碼還有調用 insertInContainerBefore(parent, stateNode, before); 來排除 COMMENT 節點的狀況
+      parent.insertBefore(stateNode, before);
+    } else {
+      // 源碼還有調用 appendChildToContainer(parent, stateNode); 來排除 COMMENT 節點的狀況
+      parent.appendChild(stateNode);
     }
-
-    // 遍歷 fiber 尋找 finishedWork 兄弟節點，並且 這個 sibling 有 dom 節點，且是更新的節點
-    // 在本輪不發生移動
-    const before = getHostSibling(finishedWork);
-    insertOrAppendPlacementNode(finishedWork, before, parentDOM);
   } else {
-    // 要是根節點是 Fragment，會沒有stateNode
-    let child = finishedWork.child;
-    while (child !== null) {
-      commitPlacement(child);
-      child = child.sibling;
+    const child = node.child;
+    if (child !== null) {
+      insertOrAppendPlacementNodeIntoContainer(child, before, parent);
+      let sibling = child.sibling;
+      while (sibling !== null) {
+        insertOrAppendPlacementNodeIntoContainer(sibling, before, parent);
+        sibling = sibling.sibling;
+      }
     }
+  }
+}
+
+function commitPlacement(finishedWork: Fiber) {
+  // 源碼位置：react-debugger/src/react/packages/react-reconciler/src/ReactFiberCommitWork.js
+  // 要找到最接近的祖先節點 是 Host 的 fiber，再把他塞進去
+  const parentFiber = getHostParentFiber(finishedWork);
+  switch (parentFiber.tag) {
+    case HostComponent: {
+      const parent = parentFiber.stateNode;
+      const before = getHostSibling(finishedWork);
+      insertOrAppendPlacementNode(finishedWork, before, parent);
+      break;
+    }
+    case HostRoot: {
+      const parent = parentFiber.stateNode.containerInfo;
+      const before = getHostSibling(finishedWork);
+      insertOrAppendPlacementNodeIntoContainer(finishedWork, before, parent);
+      break;
+    }
+    default:
+      throw new Error(
+        "Invalid host parent fiber. This error is likely caused by a bug " +
+          "in React. Please file an issue."
+      );
   }
 }
 
@@ -151,7 +175,6 @@ function insertOrAppendPlacementNode(
   parent: Element
 ) {
   if (before) {
-    // insertBefore(newNode, referenceNode)
     parent.insertBefore(getStateNode(node), before);
   } else {
     parent.appendChild(getStateNode(node));

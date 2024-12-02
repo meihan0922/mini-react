@@ -143,10 +143,12 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
   ) {
     if (current === null || current.tag !== HostText) {
       // 老節點不是文本節點，但已經確定 key 是一樣的了，直接創建新的
+      // Insert
       const created = createFiberFromText(textContent);
       created.return = returnFiber;
       return created;
     } else {
+      // Update
       // 復用
       const existing = useFiber(current, textContent);
       existing.return = returnFiber;
@@ -264,11 +266,13 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
     return null;
   }
 
+  // 返回頭節點
   function reconcileChildrenArray(
     returnFiber: Fiber,
     currentFirstChild: Fiber | null,
     newChildren: Array<any>
   ) {
+    // 鏈表沒有下標，要另外紀錄
     let newIdx = 0;
     // 頭節點
     let resultFirstChild: Fiber | null = null;
@@ -348,7 +352,7 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
         );
 
         if (previousNewFiber === null) {
-          // 紀錄頭節點，不能用 index 判斷，因為有可能 null，null 就不是有效的 fiber
+          // 紀錄頭節點，不能用 index 判斷，因為有可能走 null 不是有效的 fiber，continue
           resultFirstChild = newFiber;
         } else {
           // 把前一個節點的兄弟節點重新指向
@@ -407,7 +411,7 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
     // 先判斷是否就是文本節點，或是單節點而已
     if (isText(newChild)) {
       return placeSingleChild(
-        reconcileSingleTextNode(returnFiber, currentFirstChild, newChild)
+        reconcileSingleTextNode(returnFiber, currentFirstChild, newChild + "")
       );
     }
     // 如果節點是陣列，有多個子節點
