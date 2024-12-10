@@ -1,3 +1,12 @@
+- [ClassComponent 和 HostRoot 的 UpdateQueue](#classcomponent---hostroot---updatequeue)
+  - [updateQueue 的結構和初始化創建 - initializeUpdateQueue](#updatequeue-------------initializeupdatequeue)
+  - [創建 update - createUpdate](#---update---createupdate)
+  - [update 入隊](#update---)
+  - [管理 concurrentQueues 掛上 UpdateQueue - finishQueueingConcurrentUpdates](#---concurrentqueues----updatequeue---finishqueueingconcurrentupdates)
+  - [處理 UpdateQueue - processUpdateQueue](#---updatequeue---processupdatequeue)
+  - [總結](#--)
+  - [所以， setState 為什麼是異步的？](#----setstate---------)
+
 # ClassComponent 和 HostRoot 的 UpdateQueue
 
 react 節點狀態儲存在 `fiber.memorizedState` 上，老節點到新節點的更新儲存在 `fiber.updateQueue` 上。不同類型節點對應的 `updateQueue` 儲存的內容格式不同。
@@ -90,10 +99,72 @@ export function createUpdate(lane) {
 如果 `setState` 2 次 -> 2 個 `update` ，重複 2 次(`createUpdate` -> `enqueueUpdate` -> `scheduleUpdateOnFiber`)，將 update 推送到 `concurrentQueues` 陣列中，這樣以後就可以訪問 queue, fiber, update 等等。
 再在 render 後、workLoopSync 前， `finishQueueingConcurrentUpdates` 一次處理，將其添加到 `queue.shared.pending;` 隊列當中
 
+值得注意的是，hooks 當中也會調用
+hooks 的 update 和 queue:
+
+```ts
+// 存在在 fiber 的 memoizedState 上
+const hookUpdate = {
+  memoizedState: null,
+  baseState: null,
+  baseQueue: null,
+  queue: {
+    pending: null,
+    lanes: NoLanes,
+    dispatch: null,
+    lastRenderedReducer: reducer,
+    lastRenderedState: initialState,
+  },
+  next: null,
+};
+```
+
+class component 的 update:
+
+```ts
+const classComponentUpdate = {
+  lane, // Lane
+  tag: UpdateState, //  1 | 2 | 3 | 4
+  payload: null, // 像是 setState 會有參數，forceUpdate 就沒有
+  callback: null, // 以前 render 可以加上 callback
+  next: null, // Update<State> 多次調用會組成鏈表，供後續批量處理
+};
+
+// 存在在 fiber 的 updateQueue 上
+const queue = {
+  // 基本狀態，比方類組件初次掛載更新存初始狀態、頁面的初次渲染，root掛載就是存element
+  baseState: fiber.memoizedState,
+  // ! 單鏈表的結構，會一路指向 lastBaseUpdate
+  firstBaseUpdate: null,
+  // 紀錄尾節點，一般來說是不用紀錄尾節點的，只是為了快速比較兩個單鏈表，用尾節點比較
+  lastBaseUpdate: null,
+  // 新得到的 update 會放在此，處理完後，會轉移到 BaseUpdate 上
+  shared: {
+    pending: null, // ! 單向循環鏈表，正在掛載的更新
+    lanes: NoLanes, // ! Lanes，整個 pending 的 merge
+    /**
+     * 先跳過
+     * 如果類組件是 Activity(以前叫做offScreen)的後代組件，
+     * 需要延遲執行期 setState 的 callback，
+     * 這裡只是先暫時收集，commit 階段提交，
+     */
+    hiddenCallbacks: null,
+  },
+  callbacks: null,
+};
+```
+
 > react-debugger/src/react/packages/react-reconciler/src/ReactFiberClassUpdateQueue.js
 
 ```ts
-const root = enqueueUpdate(current, update, lane);
+export function enqueueConcurrentClassUpdate(fiber, queue, update, lane) {
+  const concurrentQueue = queue;
+  const concurrentUpdate = update;
+  // 入隊，進入陣列
+  enqueueUpdate(fiber, concurrentQueue, concurrentUpdate, lane);
+  // 返回 fiberRoot
+  return getRootForUpdatedFiber(fiber);
+}
 ```
 
 > react-debugger/src/react/packages/react-reconciler/src/ReactFiberConcurrentUpdates.js
@@ -132,7 +203,7 @@ function enqueueUpdate(fiber, queue, update, lane) {
 
 ## 管理 concurrentQueues 掛上 UpdateQueue - finishQueueingConcurrentUpdates
 
-`scheduleUpdateOnFiber` -> 調度更新開始之前（render 剛開始） `prepareFreshStack` ， 執行 `finishQueueingConcurrentUpdates`，調度更新結束時，再次調用。
+`scheduleUpdateOnFiber` -> 調度更新開始之前（render 剛開始） `prepareFreshStack` ， 執行 `finishQueueingConcurrentUpdates`，調度更新結束時，再次調用。更新時也會調用。
 
 把 concurrentQueues 的內容添加到 fiber 的 queue 上
 
@@ -215,10 +286,6 @@ export function processUpdateQueue(
   // This is always non-null on a ClassComponent or HostRoot
   const queue = workInProgress.updateQueue;
   hasForceUpdate = false;
-
-  if (__DEV__) {
-    currentlyProcessingQueue = queue.shared;
-  }
 
   // ! pending update是單向循環鏈表，firstBaseUpdate, lastBaseUpdate 不是
   let firstBaseUpdate = queue.firstBaseUpdate;

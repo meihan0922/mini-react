@@ -93,9 +93,9 @@
 
 # mini-react
 
-- [scheduler 筆記及實現](./packages/scheduler/README.md)
-- [二叉堆算法筆記及實現](./packages/scheduler/heap.md)
-- [react 工作流程](./react%20工作流程.md)
+- [scheduler 筆記及實現整理筆記](./packages/scheduler/README.md)
+- [二叉堆算法筆記及實現整理筆記](./packages/scheduler/heap.md)
+- [react 工作流程整理筆記](./react%20工作流程.md)
 
 ---
 
@@ -855,7 +855,7 @@ export default { createRoot };
 > [!TIP] 源碼筆記
 > [react-debugger/src/react/packages/react-reconciler/src/ReactFiberReconciler.js](./react-debugger/src/react/packages/react-reconciler/src/ReactFiberReconciler.js)
 >
-> [react-debugger/src/react/packages/react-reconciler/src/ReactFiberRoot.js](./react-debugger/src/react/packages/react-reconciler/src/ReactFiberRoot.js) > [ClassComponent 和 HostRoot 的 UpdateQueue](./UpdateQueue.md)
+> [react-debugger/src/react/packages/react-reconciler/src/ReactFiberRoot.js](./react-debugger/src/react/packages/react-reconciler/src/ReactFiberRoot.js) > [ClassComponent 和 HostRoot 的 UpdateQueue 整理筆記](./UpdateQueue.md)
 
 手寫： @mono/react-reconciler/src/ReactFiberReconciler.ts
 
@@ -1013,7 +1013,7 @@ export function scheduleTaskForRootDuringMicrotask(root: FiberRoot) {
 先簡單介紹下 react-reconciler。
 從此開始進入 fiber 的創建，也就是建立虛擬 DOM。
 
-react-reconciler 是對 fiber 樹進行[深度優先遍歷(DFS)](./DFS.md)，
+react-reconciler 是對 fiber 樹進行[深度優先遍歷(DFS) 整理筆記](./DFS.md)，
 主要做幾件事：
 
 1. 遍歷樹：首先訪問根節點，（初次渲染會依序創建子節點），依次訪問 child（第一個子節點），產生出兩棵樹，尚未更新到畫面的以及現存在內存當中的舊的樹。
@@ -1021,7 +1021,7 @@ react-reconciler 是對 fiber 樹進行[深度優先遍歷(DFS)](./DFS.md)，
 3. 更新 fiber 節點的相關操作，比如狀態、屬性、生命週期等等，分配不同的優先級，依賴 scheduler 控制。
 4. 遞歸重複上述 2.3. 處理子節點。
 5. 後續交給協調層，將更新虛擬樹轉換為真實 DOM
-   > [可以看 react 工作流程的三層架構](./react%20工作流程.md)
+   > [可以看 react 工作流程的三層架構 整理筆記](./react%20工作流程.md)
 
 - reconciler 工作流程有分兩階段
 
@@ -1051,7 +1051,7 @@ react-reconciler 是對 fiber 樹進行[深度優先遍歷(DFS)](./DFS.md)，
 ![performConcurrentWorkOnRoot](./assets/performConcurrentWorkOnRoot.png)
 
 > [!TIP] 詳見隔壁頁筆記：
-> [源碼當中的 renderRootConcurrent 和 renderRootSync](./react%20工作流程.md) > [源碼當中的 commit 階段](./react%20工作流程.md)
+> [源碼當中的 renderRootConcurrent 和 renderRootSync 整理筆記](./react%20工作流程.md) > [源碼當中的 commit 階段 整理筆記](./react%20工作流程.md)
 
 #### 先處理 beginWork
 
@@ -1644,9 +1644,17 @@ function reconcileChildFibers(
 // 只有協調單個子節點，沒有bailout
 function reconcileSingleTextNode(
   returnFiber: Fiber,
-  currentFirstChild: Fiber | null, // TODO:
+  currentFirstChild: Fiber | null,
   textContent: string | number
 ) {
+  // ! 看完後面多節點 diff 再回來處理 update
+  // if (currentFirstChild !== null && currentFirstChild.tag === HostText) {
+  //   deleteRemainingChildren(returnFiber, currentFirstChild.sibling);
+  //   const existing = useFiber(currentFirstChild, textContent);
+  //   existing.return = returnFiber;
+  //   return existing;
+  // }
+
   // 把 textContent 作為 pendingProps 放入 fiber
   // 強制轉型成字串，以防數字
   const created = createFiberFromText(textContent + "");
@@ -2399,25 +2407,66 @@ export function completeWork(
 ## Hooks
 
 - 規則：官網說不能在循換、條件或是嵌套中調用，要確保在 react 函式最頂層以及任何 return 前調用他們。
-  - 是為什麼呢？ 因為在 hook 存在在 `fiber.memorized` 中，*單鏈表*的每個 hook 節點是沒有名字或是 key 的，除了他們的順序，_無法記錄他們的唯一性_，為了保持穩定性，才有這些規則。
+  - 🌟 是為什麼呢？ 因為在 hook 存在在 `fiber.memorized` 中，**單鏈表**的每個 hook 節點是沒有名字或是 key 的，除了他們的順序，_無法記錄他們的唯一性_，為了保持穩定性，才有這些規則。
 - 類型：
 
   ```ts
+  export type Update<S, A> = {
+    lane: Lane;
+    action: A;
+    hasEagerState: boolean;
+    eagerState: S | null;
+    next: Update<S, A>;
+  };
+
+  // hook 上有 queue
+  export type UpdateQueue<S, A> = {
+    pending: Update<S, A> | null;
+    lanes: Lanes;
+    dispatch: (A => mixed) | null;
+    lastRenderedReducer: ((S, A) => S) | null; // 上次執行的 reducer
+    lastRenderedState: S | null; // 組件上次掛載的狀態
+  };
+
   export type Hook = {
-    // 不同類型的 hook，取值也不同
+    // 不同類型的 hook，存的內容不同
     // useState / useReducer 存 state，
-    // useEffect / useLayoutEffect 存 effect單向循環鏈表
+    // useEffect / useLayoutEffect 存 effect 單向循環鏈表
     memorizedState: any;
 
     // 下一個 hook，如果是 null，表示他是最後一個 hook
     next: Hook | null;
 
-    // 下面三個先不深入，之後再說
-    baseState: any;
-    baseQueue: Update<any, any> | null;
-    queue: any;
+    baseState: any; // 所有的 update 對象合併後的狀態（比方說setState多次調用
+    baseQueue: Update<any, any> | null; // 環形鏈表，只有包含高域本次渲染優先級的 update對象
+    queue: any; // 包括所有優先級的 update 對象
   };
   ```
+
+  ```mermaid
+  graph TD
+    subgraph Hook鏈表
+        Hook1[Hook] --> Queue1[queue]
+        Queue1 -->|pending| Update1[update latest]
+        Update1 -->|next| Update2[update 1]
+        Update2 -->|next| Update3[update 2]
+
+        Hook2[Hook] --> Queue2[queue]
+        Queue2 -->|pending| Update4[update latest]
+        Update4 -->|next| Update5[update 1]
+        Update5 -->|next| Update6[update 2]
+
+        Hook3[Hook] --> Queue3[queue]
+        Queue3 -->|pending| Update7[update latest]
+        Update7 -->|next| Update8[update 1]
+        Update8 -->|next| Update9[update 2]
+    end
+  ```
+
+- 狀態 hook：
+  廣義上來說，只要能實現持久化且沒有副作用的 Hook 都可以視為狀態 hook。包含 `useContext` `useRef` `useCallback` `useMemo` 等。在多次 render 時， fiber 保證復用同個 hook 對象，進而實現數據的持久化
+- 副作用 hook：
+  會修改 `fiber.flags`，在 `completeWork` 階段中，所有存在副作用的節點，都會被添加到父節點的副作用隊列當中，最後 commitRoot 處理他們。
 
 - 存儲：
   就像是 fiber，會有一個指針指向正在工作中的 hook - `workInProgressHook`
@@ -2434,20 +2483,27 @@ export function completeWork(
   }
   ```
 
+> [!TIP] 源碼筆記
+> [react-debugger/src/react/packages/react-reconciler/src/ReactFiberHooks.js](./react-debugger/src/react/packages/react-reconciler/src/ReactFiberHooks.js)
+>
+> [Hooks 整理筆記](./Hooks.md)
+
 ### 模擬 useReducer
 
 ```tsx
 function Comp() {
-  const [count, setC] = useReducer((x) => {
-    return x + 1;
-  }, 0);
+  // const [count, setC] = useReducer((x) => {
+  //   return x + 1;
+  // }, 0);
 
   // 僅先處理一個子節點喔
   return (
     <button
       onClick={() => {
         console.log("??????click");
-        setC();
+        {
+          /* setC(); */
+        }
       }}
     >
       {count}
@@ -2482,6 +2538,8 @@ function finalizeInitialChildren(domElement: Element, props: any) {
 此時已經可以看到`console.log("??????click");`
 
 #### 定義 useReducer
+
+##### 掛載 / 更新
 
 ##### 架構
 
@@ -3059,7 +3117,7 @@ function reconcileSingleElement(
         return existing;
       } else {
         // ! 同層級下 key 不應相同，沒一個可以復用，要刪除所有的剩下的child(之前的已經走到下面的 deleteChild)
-        deleteRemaingChildren(returnFiber, child);
+        deleteRemainingChildren(returnFiber, child);
         break;
       }
     } else {
@@ -3087,7 +3145,7 @@ function deleteChild(returnFiber: Fiber, childToDelete: Fiber) {
   }
 }
 
-function deleteRemaingChildren(returnFiber: Fiber, currentFirstChild: Fiber) {
+function deleteRemainingChildren(returnFiber: Fiber, currentFirstChild: Fiber) {
   if (!shouldTrackSideEffect) {
     // 初次渲染
     return;
@@ -3423,7 +3481,7 @@ function placeChild(
 ```ts
 // 2.1 老節點還有，新節點沒了，刪除剩餘的老節點
 if (newIdx === newChildren.length) {
-  deleteRemaingChildren(returnFiber, oldFiber);
+  deleteRemainingChildren(returnFiber, oldFiber);
   return resultFirstChild;
 }
 ```
