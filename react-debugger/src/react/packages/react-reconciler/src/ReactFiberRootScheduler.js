@@ -360,6 +360,7 @@ function scheduleTaskForRootDuringMicrotask(root, currentTime) {
     root.cancelPendingCommit !== null
   ) {
     // Fast path: There's nothing to work on.
+    // ! 新任務的優先級>現有的任務優先級，取消現有的任務執行
     if (existingCallbackNode !== null) {
       cancelCallback(existingCallbackNode);
     }
@@ -369,6 +370,7 @@ function scheduleTaskForRootDuringMicrotask(root, currentTime) {
   }
 
   // Schedule a new callback in the host environment.
+  // ! 判斷新任務的優先級是否是同步的
   if (includesSyncLane(nextLanes)) {
     // Synchronous work is always flushed at the end of the microtask, so we
     // don't need to schedule an additional task.
@@ -379,10 +381,13 @@ function scheduleTaskForRootDuringMicrotask(root, currentTime) {
     root.callbackNode = null;
     return SyncLane;
   } else {
+    // ! 非同步的優先級更新
     // We use the highest priority lane to represent the priority of the callback.
     const existingCallbackPriority = root.callbackPriority;
+    // ! 拿到最高優先級的任務
     const newCallbackPriority = getHighestPriorityLane(nextLanes);
 
+    // ! 如果新的任務優先級和現在執行的一樣，就繼續執行正常的任務
     if (
       newCallbackPriority === existingCallbackPriority &&
       // Special case related to `act`. If the currently scheduled task is a

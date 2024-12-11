@@ -133,6 +133,9 @@ export function createFiberFromTypeAndProps(
   lanes: Lanes = NoLanes
 ): Fiber {
   // 是組件！
+  // IndeterminateComponent: 因為React 中的函數元件有多種寫法，有些形似函數元件的也可能是類別元件，
+  // 為了保險起見，函數元件會先被設定為IndeterminateComponent，
+  // 然後在對這個類型的處理中，會辨識你寫的元件是函數元件還是類別元件
   let fiberTag: WorkTag = IndeterminateComponent;
   if (isFn(type)) {
     // 是 ClassComponent | FunctionComponent

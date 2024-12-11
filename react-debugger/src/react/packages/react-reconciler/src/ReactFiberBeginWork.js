@@ -1081,6 +1081,7 @@ function updateFunctionComponent(
     hasId = checkDidRenderIdHook();
     setIsRendering(false);
   } else {
+    // * 處理 hooks，要把 hooks 和 fiber 關聯
     nextChildren = renderWithHooks(
       current,
       workInProgress,

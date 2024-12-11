@@ -1129,11 +1129,13 @@ function updateReducerImpl(hook, current, reducer) {
   queue.lastRenderedReducer = reducer;
 
   // The last rebase update that is NOT part of the base state.
+  // ! 上次優先度不足遺留下來的任務
   let baseQueue = hook.baseQueue; // ! 單向循環鏈表
 
   // The last pending update that hasn't been processed yet.
+  // ! 拿 queue 隊列
   const pendingQueue = queue.pending;
-  // ! 把 pendingQueue 轉移到 baseQueue
+  // ! 拼接隊列，把 pendingQueue 轉移到 baseQueue
   if (pendingQueue !== null) {
     // We have new updates that haven't been processed yet.
     // We'll add them to the base queue.
@@ -1161,10 +1163,24 @@ function updateReducerImpl(hook, current, reducer) {
   if (baseQueue !== null) {
     // We have a queue to process.
     const first = baseQueue.next;
-    let newState = hook.baseState;
+    // ! 因為是可能被中斷的，所以要記下上次執行到一半的結果，可能不等於當前渲染的結果
+    // ! 確保在高優先級打斷當前渲染時，可以回退到一個穩定的狀態
+    // ! memoizedState 是最後一次渲染計算的狀態結果
+    // ! baseState 會是 commit 的結果
+    /** 
+     * ! 比方說
+     * const [state, setState] = useState(0);
+        setState(1);  // 低優先級
+        setState(2);  // 高優先級
+        setState(3);  // 低優先級
+        1. memoizedState(2，用于最新的 UI 渲染)，baseState(0，不會更新) 
+        2. 換低優先級處理時，重新計算所有低優先級更新，memoizedState(3)
+        3. 所有更新完成，baseState(3)
+     **/
+    let newState = hook.baseState; // ! 上次渲染的結果值，每次循環時計算再賦值，供下次循環使用
 
-    let newBaseState = null;
-    let newBaseQueueFirst = null;
+    let newBaseState = null; // ! 用於下次渲染
+    let newBaseQueueFirst = null; // ! 新的 baseQueue
     let newBaseQueueLast = null;
     let update = first;
     // ! 循環遍歷 hooks 鏈表
@@ -1183,7 +1199,7 @@ function updateReducerImpl(hook, current, reducer) {
         : // ! 如果 lane 沒有變動，表示沒有更新
           !isSubsetOfLanes(renderLanes, updateLane);
 
-      // ! ! 優先權不夠，加入baseQueue, 等待下次render
+      // ! ! 優先級不夠，加入baseQueue, 等待下次render
       if (shouldSkipUpdate) {
         // Priority is insufficient. Skip this update. If this is the first
         // skipped update, the previous update/state is the new base
@@ -1205,10 +1221,12 @@ function updateReducerImpl(hook, current, reducer) {
         // Update the remaining priority in the queue.
         // TODO: Don't need to accumulate this. Instead, we can remove
         // renderLanes from the original lanes.
+        // ! 更新優先級
         currentlyRenderingFiber.lanes = mergeLanes(
           currentlyRenderingFiber.lanes,
           updateLane
         );
+        // ! 標示跳過的任務優先級
         markSkippedUpdateLanes(updateLane);
       } else {
         // ! 優先權足夠，狀態合併
@@ -1220,11 +1238,13 @@ function updateReducerImpl(hook, current, reducer) {
           // This is not an optimistic update, and we're going to apply it now.
           // But, if there were earlier updates that were skipped, we need to
           // leave this update in the queue so it can be rebased later.
+          // ! 之前的節點有不能執行的，那後面的節點都要緩存
           if (newBaseQueueLast !== null) {
             const clone = {
               // This update is going to be committed so we never want uncommit
               // it. Using NoLane works because 0 is a subset of all bitmasks, so
               // this will never be skipped by the check above.
+              // ! 該update需要被執行，使用NoLane，避免跳過
               lane: NoLane,
               revertLane: NoLane,
               action: update.action,
@@ -1302,23 +1322,25 @@ function updateReducerImpl(hook, current, reducer) {
       update = update.next;
     } while (update !== null && update !== first);
 
-    // ! 更新屬性
     if (newBaseQueueLast === null) {
+      // ! 所有的更新都被執行了，沒有下次渲染了，所以下一次需要的 baseState 就是結果
       newBaseState = newState;
     } else {
+      // ! 有低優先級的更新任務，則next指向頭一個，變成單向循環鏈表
       newBaseQueueLast.next = newBaseQueueFirst;
     }
 
     // Mark that the fiber performed work, but only if the new state is
     // different from the current state.
+    // ! 如果 newState 和之前的不一樣，標記該 fiber 需要更新
     if (!is(newState, hook.memoizedState)) {
       markWorkInProgressReceivedUpdate();
     }
 
-    // 存在 fiber.memoizedState.memoizedState 上
-    hook.memoizedState = newState;
-    hook.baseState = newBaseState;
-    hook.baseQueue = newBaseQueueLast;
+    // ! 存在 fiber.memoizedState.memoizedState 上
+    hook.memoizedState = newState; // ! 本次渲染使用
+    hook.baseState = newBaseState; // ! 下次執行鏈表時的初始值
+    hook.baseQueue = newBaseQueueLast; // ! 新的 update 列表，可能是空的
 
     queue.lastRenderedState = newState;
   }
@@ -1732,7 +1754,9 @@ function pushEffect(tag, create, inst, deps) {
     // Circular
     next: null,
   };
+  // ! 獲取更新隊列
   let componentUpdateQueue = currentlyRenderingFiber.updateQueue;
+  // ! 沒有隊列的話，先創建
   if (componentUpdateQueue === null) {
     componentUpdateQueue = createFunctionComponentUpdateQueue();
     currentlyRenderingFiber.updateQueue = componentUpdateQueue;
@@ -1866,19 +1890,22 @@ function updateEffectImpl(fiberFlags, hookFlags, create, deps) {
 
   // currentHook is null on initial mount when rerendering after a render phase
   // state update or for strict mode.
+  // ! 組件是否在更新階段
   if (currentHook !== null) {
     if (nextDeps !== null) {
       const prevEffect = currentHook.memoizedState;
       const prevDeps = prevEffect.deps;
+      // ! 依賴項是否發生變化
       if (areHookInputsEqual(nextDeps, prevDeps)) {
         hook.memoizedState = pushEffect(hookFlags, create, inst, nextDeps);
         return;
       }
     }
   }
-
+  // ! 打上 tag
   currentlyRenderingFiber.flags |= fiberFlags;
-
+  // ! 1. 保存 Effect
+  // ! 2. 構建 effect 鏈表
   hook.memoizedState = pushEffect(
     HookHasEffect | hookFlags,
     create,

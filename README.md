@@ -1023,15 +1023,13 @@ react-reconciler 是對 fiber 樹進行[深度優先遍歷(DFS) 整理筆記](./
 5. 後續交給協調層，將更新虛擬樹轉換為真實 DOM
    > [可以看 react 工作流程的三層架構 整理筆記](./react%20工作流程.md)
 
-- reconciler 工作流程有分兩階段
-
-  1. render: 遍歷 fiber 樹(VDOM)，比較新舊節點，計算需要更新的部分。又分為兩階段
-     1. beginWork: 按照 workInProgress tag，執行子節點的 fiber 創建
-        - 看有沒有要走 diff，走到 bailout
-        - 沒有子節點則停止，返回子節點（深度優先，一路執行 child)
-     2. completeUnitOfWork: 循環執行創建真實 DOM
-        - 把 workInProgress 轉移指針到同層級的兄弟節點，回到 beginWork，直到所有兄弟節點與其子節點都完成，這時指針轉移到父節點上，因為此時的父節點已經執行過 beginWork，不需要跳出 completeUnitOfWork 的迴圈，執行 DOM 創建之餘，把所有有 stateNode 的子節點（需要略過 Fragment、child === null）全部 appendAllChildren 到父節點 stateNode 中。以上 重複直到根節點。
-  1. commit: VDOM -> DOM
+- render: 遍歷 fiber 樹(VDOM)，比較新舊節點，計算需要更新的部分。又分為兩階段
+  1.  beginWork: 按照 workInProgress tag，執行子節點的 fiber 創建
+      - 看有沒有要走 diff，走到 bailout
+      - 沒有子節點則停止，返回子節點（深度優先，一路執行 child)
+  2.  completeUnitOfWork: 循環執行創建真實 DOM
+      - 把 workInProgress 轉移指針到同層級的兄弟節點，回到 beginWork，直到所有兄弟節點與其子節點都完成，這時指針轉移到父節點上，因為此時的父節點已經執行過 beginWork，不需要跳出 completeUnitOfWork 的迴圈，執行 DOM 創建之餘，把所有有 stateNode 的子節點（需要略過 Fragment、child === null）全部 appendAllChildren 到父節點 stateNode 中。以上 重複直到根節點。
+- commit: VDOM -> DOM
 
 - 🌟 需要注意的是：
 
@@ -1113,14 +1111,14 @@ function workLoopSync() {
 
 #### 第一階段 workLoopSync -> performUnitOfWork()：兩階段 beginWork, completeUnitOfWork
 
-1. beginWork: 執行子節點的 fiber 創建
+1. `beginWork`: 執行子節點的 fiber 創建
 
-   1. 執行 unitOfWork，按照 workInProgress tag，執行子節點的 fiber 創建
-   2. 看有沒有要走 diff，比方類組件 shouldComponentUpdate 比較後走到 bailout,
-   3. 返回子節點也就是葉子節點（深度優先，一路執行 child)
+   1. 執行 `unitOfWork` ，按照 workInProgress tag，執行子節點的 fiber 創建
+   2. 看有沒有要走 diff，比方類組件 `shouldComponentUpdate` 比較後走到 bailout
+   3. 返回子節點也就是葉子節點（深度優先，一路執行 child，直到沒有子節點為止)
 
-2. 沒有子節點則執行 completeUnitOfWork: 循環執行創建真實 DOM
-   ，並且把 workInProgress 轉移指針到同層級的兄弟節點，回到 beginWork，直到所有兄弟節點與其子節點都完成，這時指針轉移到父節點上，因為已經執行過 beginWork，不需要跳出 completeUnitOfWork 的迴圈，執行 DOM 創建之餘，把所有有 stateNode 的子節點（需要略過 Fragment、child === null）全部 appendAllChildren 到父節點 stateNode 中。以上 重複直到根節點。
+2. 沒有子節點則執行 `completeUnitOfWork`: 循環執行創建真實 DOM
+   ，並且把 workInProgress 轉移指針到同層級的兄弟節點，回到 beginWork，直到所有兄弟節點與其子節點都完成。執行 DOM 創建之餘，把所有有 stateNode 的子節點（需要略過 Fragment、child === null）全部 appendAllChildren 到父節點 stateNode 中。以上 重複直到根節點。
 
 ```ts
 function performUnitOfWork(unitOfWork: Fiber) {
@@ -1197,7 +1195,7 @@ function reconcileChildren(
   workInProgress: Fiber,
   nextChildren: any
 ) {
-  // 初次渲染，除了根節點以外的其他節點
+  // 初次渲染時，除了根節點以外的其他節點
   if (current === null) {
     workInProgress.child = mountChildFibers(workInProgress, null, nextChildren);
   } else {
@@ -1307,7 +1305,7 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
 }
 ```
 
-##### completeUnitOfWork - 深度優先遍歷，按照 fiber tag 建立真實 DOM
+##### completeUnitOfWork - 按照 fiber tag 建立真實 DOM
 
 > react-reconciler/src/ReactFiberWorkLoop.ts
 
@@ -1336,7 +1334,6 @@ function completeUnitOfWork(unitOfWork: Fiber) {
       return;
     }
 
-    // 回到父節點上，如果下次循環，發現是已經完成的節點，會走到兄弟節點上
     completedWork = returnFiber;
     workInProgress = completedWork;
   } while (completedWork !== null);
@@ -1443,6 +1440,13 @@ createRoot(document.getElementById("root")!).render(jsx);
 
 #### 第二階段 commit: VDOM -> DOM
 
+源碼中會經歷三階段
+| 階段 | 時機 | 主要任務 | 特點 |
+| ----------------------- | --------------- | ------------------------------------------------------------ | ------------------------------------------------- |
+| commit(before mutation) | 在 DOM 更新之前 | 捕獲 DOM 之前的快照，準備 DOM 修改任務 | 紀錄更新前狀態（如滾動前位置）不會對 DOM 作出修改 |
+| mutation | 在 DOM 更新時 | 執行 DOM 增刪改，清理舊 Ref | 會同步完成 DOM 的修改，可能會影響性能 |
+| Layout | 在 DOM 更新後 | 觸發佈局相關任務，例如 componentDidUpdate 和 useLayoutEffect | 已完成更新，可以安全的操作 DOM 或是測量佈局 |
+
 > react-reconciler/src/ReactFiberWorkLoop.ts
 
 ```ts
@@ -1470,7 +1474,7 @@ function commitRoot(root: FiberRoot) {
 }
 ```
 
-創建完 VDOM 要想辦法渲染在真實的 DOM 上，已經回到根節點了，但要從最 要逐一遍歷，使用遞迴
+創建完 VDOM 要想辦法渲染在真實的 DOM 上，已經回到根節點了，但要從根節點開始逐一遍歷，使用遞迴
 
 > react-reconciler/src/ReactFiberCommitWork.ts
 
@@ -3474,7 +3478,7 @@ function placeChild(
 }
 ```
 
-#### 2.1 遍歷比較後，遇到不同的，跳出迴圈，要繼續比較剩餘的節點。
+#### 2.1 遍歷比較後，遇到不同的，跳出迴圈，要繼續比較剩餘的節點
 
 如果此時 `newIdx === newChildren.length`，表示新節點已經遍歷完成，刪除剩餘的老節點即可。
 
@@ -3955,7 +3959,7 @@ const useInterval = (
 
 - useLayoutEffect
 
-和 `useEffect` 相同，但在所有的 DOM 變更之後**同步**調用 effect。可以用它來讀取佈局並同步觸發重渲染。在瀏覽器繪製之前，`useLayoutEffect`內部的更新計畫將被同步刷新。
+和 `useEffect` 相同，但在瀏覽器把內容真正渲染到介面之前**同步**調用 effect。可以用它來讀取佈局並同步觸發重渲染。在瀏覽器繪製之前，`useLayoutEffect`內部的更新計畫將被同步刷新。
 盡量避免使用以防止阻塞渲染，延後螢幕加載。
 
 - useEffect
@@ -3975,12 +3979,14 @@ useLayoutEffect(() => {
 
 #### effect 結構
 
-首先知道 effect 是掛載在 fiber 的 updateQueue 上面，而且他的結構是長這樣
+首先知道 effect 是掛載在 fiber 的 updateQueue 上面，會儲存最
+而且他的結構是長這樣
 
 ```ts
 type Effect = {
   tag: HookFlags; // 標記 Hook 類型
-  create: () => (() => void) | void;
+  create: () => (() => void) | void; // 就是放在 useEffect 和 useLayoutEffect 的第一個參數
+  destroy: (() => void) | void; // 就是放在 useEffect 和 useLayoutEffect 的第一個參數回傳的函式
   deps: Array<any> | void | null; // 依賴項
   next: null | Effect; // 指向下一個 effect，是單向循環鏈表
 };
@@ -3996,6 +4002,15 @@ export const HookHasEffect = /* */ 0b0001;
 export const HookInsertion = /* */ 0b0010;
 export const HookLayout = /*    */ 0b0100;
 export const HookPassive = /*   */ 0b1000;
+```
+
+fiber.updateQueue 結構和 class Component 不一樣，（另外“狀態 hooks” 是儲存在 fiber.memorized，那在 hook 結構上也有叫做 updateQueue 的變數，是不同的 他儲存在 hooks 的 queue 上），結構是長這樣：
+
+```ts
+export type FunctionComponentUpdateQueue = {|
+  lastEffect: Effect | null, // 單向循環鏈表
+  stores: Array<StoreConsistencyCheck<any>> | null,
+|};
 ```
 
 fiber tag 上面也會做記號
@@ -4027,7 +4042,10 @@ export function renderWithHook(
 ```
 
 基本上 `useLayoutEffect`、`useEffect` 是做一樣的事情，只是執行的時機點不同！
-在執行之前要先在 fiber 上面標記，並且做好 effect 鏈表。
+兩者都是調用了 `mountEffectImpl`，會做幾件事
+
+1. 在 fiber 上打上 tag
+2. `pushEffect`，建立 effect 結構，加入到 fiber.updateQueue 上，再作為 hook.memoizedState
 
 > react-reconciler/src/ReactFiberHooks.ts
 
@@ -4053,11 +4071,11 @@ function updateEffectImpl(
   deps: Array<any> | void | null
 ) {
   const hook = updateWorkInProgressHook();
-  // 依賴項是否發生變化
   const nextDeps = deps === undefined ? null : deps;
-  // 組件是否在更新階段
+  // ! 組件是否在更新階段
   if (currentHook !== null) {
     if (nextDeps !== null) {
+      // ! 依賴項是否有改變
       const prevDeps = currentHook.memorizedState.deps;
       if (areHookInputEqual(nextDeps, prevDeps)) {
         return;
@@ -4065,7 +4083,10 @@ function updateEffectImpl(
     }
   }
 
+  // ! 打上 tag
   currentlyRenderingFiber!.flags |= fibrFlags;
+  // ! 注意 hook.memorizedState 依照不同類型的 hook，存的內容不同
+  // useEffect / useLayoutEffect 存 effect 單向循環鏈表，指向最後一個 effect
   // 1. 保存 Effect
   // 2. 構建 effect 鏈表
   hook.memorizedState = pushEffect(hookFlags, create, deps);
@@ -4082,10 +4103,10 @@ function pushEffect(
     deps,
     next: null,
   };
+  // ! 獲取更新隊列
   let componentUpdateQueue = currentlyRenderingFiber!.updateQueue;
 
-  // effect 是單向循環鍊錶
-  // 第一個effect
+  // ! 沒有隊列的話，先創建
   if (componentUpdateQueue === null) {
     componentUpdateQueue = {
       lastEffect: null,
@@ -4093,6 +4114,8 @@ function pushEffect(
     currentlyRenderingFiber!.updateQueue = componentUpdateQueue;
     componentUpdateQueue.lastEffect = effect.next = effect;
   } else {
+    // effect 是單向循環鍊錶
+    // 第一個effect
     // 剪開循環鏈表再接起來
     const lastEffect = componentUpdateQueue.lastEffect;
     const firstEffect = lastEffect.next;
@@ -4110,7 +4133,14 @@ function pushEffect(
 #### 執行 effect
 
 - **`useLayoutEffect` 是在 commit 階段執行的**
+  - 在 `commitMutationEffects` 階段，執行我們刪除節點和更新節點的銷毀邏輯（destory 函式)
+  - 在 `commitLayoutEffects` 階段，執行副作用函式創建的邏輯，並且掛上（destory 函式)
 - **`useEffect`是延後執行，要怎麼延後？利用 scheduleCallback，排隊等待調度！**
+  - 可以看到 commit 會在一開始就執行 `flushPassiveEffects`， 遍歷 fiber 上副作用列表，對每個標記 `HookPassive` （ `useEffect` 創建的)，調用 destory 函式，然後再調用創建邏輯並且掛上（destory 函式)
+  - 把 `rootWithPendingPassiveEffects` 設定成 null，因為上次渲染可能因為要處理 effect 時，被高優先級的任務強佔而沒執行，就需要確保進入 commit 之前，沒有還沒執行的副作用（這個檢查過程可能也是會被搶佔）
+  - 在進入 `commitBeforeMutationEffects` 之前，如果節點上有 HookPassive 標記，（在 render 過程中會做好記號），表示有需要被處理的副作用，把 `rootDoesHavePassiveEffects` 設定成 true。申請一個調度，給 `flushPassiveEffects` 一個低優先級的任務，進入 commit。
+  - 三階段執行完成後，根據 `rootDoesHavePassiveEffects` 判斷有副作用等待執行，`rootWithPendingPassiveEffects = fiberRoot`（上面有 effectlist）。前面剛剛註冊的調度，執行 effect。
+  - 執行中可能會被中斷，`rootWithPendingPassiveEffects` 就需要清空
 
 > react-reconciler/src/ReactFiberWorkLoop.ts
 
