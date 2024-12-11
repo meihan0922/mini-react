@@ -96,6 +96,8 @@
 - [scheduler 筆記及實現整理筆記](./packages/scheduler/README.md)
 - [二叉堆算法筆記及實現整理筆記](./packages/scheduler/heap.md)
 - [react 工作流程整理筆記](./react%20工作流程.md)
+- [react 圖解重點筆記](./assets/flowNote.pdf)
+  ![react 圖解重點筆記](./assets/flowNote.png)
 
 ---
 
