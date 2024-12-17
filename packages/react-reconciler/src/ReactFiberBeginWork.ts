@@ -187,6 +187,8 @@ function updateHostFragment(current: Fiber | null, workInProgress: Fiber) {
 }
 
 function updateHostText() {
+  // Nothing to do here. This is terminal. We'll do the completion step
+  // immediately after.
   return null;
 }
 // 根 fiber 節點，所需要做的只是，協調子節點

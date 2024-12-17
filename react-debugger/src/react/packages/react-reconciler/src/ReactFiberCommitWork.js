@@ -342,9 +342,11 @@ let focusedInstanceHandle = null;
 let shouldFireAfterActiveInstanceBlur = false;
 
 export function commitBeforeMutationEffects(root, firstChild) {
+  // ! 準備提交
   focusedInstanceHandle = prepareForCommit(root.containerInfo);
 
   nextEffect = firstChild;
+  // ! 開始提交
   commitBeforeMutationEffects_begin();
 
   // We no longer need to track the active instance fiber
@@ -363,6 +365,7 @@ function commitBeforeMutationEffects_begin() {
     // Let's skip the whole loop if it's off.
     if (enableCreateEventHandleAPI) {
       // TODO: Should wrap this in flags check, too, as optimization
+      // ! 要刪除的節點們
       const deletions = fiber.deletions;
       if (deletions !== null) {
         for (let i = 0; i < deletions.length; i++) {
@@ -380,6 +383,7 @@ function commitBeforeMutationEffects_begin() {
       child.return = fiber;
       nextEffect = child;
     } else {
+      // ! 結束
       commitBeforeMutationEffects_complete();
     }
   }
@@ -480,6 +484,7 @@ function commitBeforeMutationEffectsOnFiber(finishedWork) {
               }
             }
           }
+          // ! 生命週期 getSnapshotBeforeUpdate
           const snapshot = instance.getSnapshotBeforeUpdate(
             finishedWork.elementType === finishedWork.type
               ? prevProps
@@ -1023,6 +1028,7 @@ function commitLayoutEffectOnFiber(
         committedLanes
       );
       if (flags & Update) {
+        // ! 執行 useLayoutEffect，同步執行，確保在瀏覽器繪製之前完成
         commitHookLayoutEffects(finishedWork, HookLayout | HookHasEffect);
       }
       break;
@@ -1034,6 +1040,7 @@ function commitLayoutEffectOnFiber(
         committedLanes
       );
       if (flags & Update) {
+        // ! 執行生命週期
         commitClassLayoutLifecycles(finishedWork, current);
       }
 
@@ -1708,6 +1715,7 @@ function isHostParent(fiber) {
 }
 
 function getHostSibling(fiber) {
+  debugger;
   // We're going to search forward into the tree until we find a sibling host
   // node. Unfortunately, if multiple insertions are done in a row we have to
   // search past them. This leads to exponential search for the next sibling.
@@ -2018,6 +2026,7 @@ function commitDeletionEffectsOnFiber(
     }
     case HostComponent: {
       if (!offscreenSubtreeWasHidden) {
+        // ! ref 設置 null
         safelyDetachRef(deletedFiber, nearestMountedAncestor);
       }
       // Intentional fallthrough to next branch
@@ -2030,6 +2039,7 @@ function commitDeletionEffectsOnFiber(
         const prevHostParent = hostParent;
         const prevHostParentIsContainer = hostParentIsContainer;
         hostParent = null;
+        // ! 執行刪除子節點
         recursivelyTraverseDeletionEffects(
           finishedRoot,
           nearestMountedAncestor,
@@ -2041,6 +2051,7 @@ function commitDeletionEffectsOnFiber(
         if (hostParent !== null) {
           // Now that all the child effects have unmounted, we can remove the
           // node from the tree.
+          // ! 刪除真正的 DOM，調用原生方法 removeChild
           if (hostParentIsContainer) {
             removeChildFromContainer(hostParent, deletedFiber.stateNode);
           } else {
@@ -2114,6 +2125,7 @@ function commitDeletionEffectsOnFiber(
     case MemoComponent:
     case SimpleMemoComponent: {
       if (!offscreenSubtreeWasHidden) {
+        // ! 讀取要刪除的節點的 updateQueue
         const updateQueue = deletedFiber.updateQueue;
         if (updateQueue !== null) {
           const lastEffect = updateQueue.lastEffect;
@@ -2134,6 +2146,7 @@ function commitDeletionEffectsOnFiber(
                     destroy
                   );
                 } else if ((tag & HookLayout) !== NoHookEffect) {
+                  // ! 標記 useLayoutEffect 副作用
                   if (enableSchedulingProfiler) {
                     markComponentLayoutEffectUnmountStarted(deletedFiber);
                   }
@@ -2166,7 +2179,7 @@ function commitDeletionEffectsOnFiber(
           }
         }
       }
-
+      // ! 繼續遞歸刪除邏輯
       recursivelyTraverseDeletionEffects(
         finishedRoot,
         nearestMountedAncestor,
@@ -2176,9 +2189,11 @@ function commitDeletionEffectsOnFiber(
     }
     case ClassComponent: {
       if (!offscreenSubtreeWasHidden) {
+        // ! ref 設置 null
         safelyDetachRef(deletedFiber, nearestMountedAncestor);
         const instance = deletedFiber.stateNode;
         if (typeof instance.componentWillUnmount === "function") {
+          // ! componentWillUnmount
           safelyCallComponentWillUnmount(
             deletedFiber,
             nearestMountedAncestor,
@@ -2186,6 +2201,7 @@ function commitDeletionEffectsOnFiber(
           );
         }
       }
+      // ! 繼續遞歸刪除邏輯
       recursivelyTraverseDeletionEffects(
         finishedRoot,
         nearestMountedAncestor,
@@ -2409,6 +2425,7 @@ export function isSuspenseBoundaryBeingHidden(current, finishedWork) {
   return false;
 }
 
+// ! 針對不同類型的fiber，做不同處理，但共通點是處理刪除和插入
 export function commitMutationEffects(root, finishedWork, committedLanes) {
   inProgressLanes = committedLanes;
   inProgressRoot = root;
@@ -2425,7 +2442,7 @@ function recursivelyTraverseMutationEffects(root, parentFiber, lanes) {
   // Deletions effects can be scheduled on any fiber type. They need to happen
   // before the children effects hae fired.
   const deletions = parentFiber.deletions; // array || null
-  // * 有要刪除的節點，如果子節點是韓式或是類組件，要處理生命週期
+  // ! 有要刪除的節點，如果子節點是函式或是類組件，要處理生命週期
   if (deletions !== null) {
     for (let i = 0; i < deletions.length; i++) {
       const childToDelete = deletions[i];
@@ -2463,11 +2480,14 @@ function commitMutationEffectsOnFiber(finishedWork, root, lanes) {
     case ForwardRef:
     case MemoComponent:
     case SimpleMemoComponent: {
+      // ! 刪除操作
       recursivelyTraverseMutationEffects(root, finishedWork, lanes);
+      // ! 插入操作
       commitReconciliationEffects(finishedWork);
 
       if (flags & Update) {
         try {
+          // !
           commitHookEffectListUnmount(
             HookInsertion | HookHasEffect,
             finishedWork,
@@ -2511,6 +2531,9 @@ function commitMutationEffectsOnFiber(finishedWork, root, lanes) {
       }
       return;
     }
+    // ! 將 ref 指向的元素設為null
+    // ! componentWillUnmount
+    // ! 向下遍歷子節點，需要遞歸刪除孩子節點
     case ClassComponent: {
       recursivelyTraverseMutationEffects(root, finishedWork, lanes);
       commitReconciliationEffects(finishedWork);
@@ -2643,6 +2666,9 @@ function commitMutationEffectsOnFiber(finishedWork, root, lanes) {
       }
       // Fall through
     }
+    // ! 將 ref 指向的元素設為null
+    // ! 向下遍歷子節點，執行刪除邏輯
+    // ! 最後呼叫 removeChild 方法刪除真實DOM
     case HostComponent: {
       recursivelyTraverseMutationEffects(root, finishedWork, lanes);
       commitReconciliationEffects(finishedWork);
@@ -2987,6 +3013,7 @@ function commitMutationEffectsOnFiber(finishedWork, root, lanes) {
     }
   }
 }
+// ! 在真實DOM 樹中插入DOM 節點
 function commitReconciliationEffects(finishedWork) {
   // Placement effects (insertions, reorders) can be scheduled on any fiber
   // type. They needs to happen after the children effects have fired, but

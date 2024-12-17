@@ -654,7 +654,7 @@ function constructClassInstance(workInProgress, ctor, props) {
       ? getMaskedContext(workInProgress, unmaskedContext)
       : emptyContextObject;
   }
-
+  // ! 初始化
   let instance = new ctor(props, context);
   // Instantiate twice to help detect side-effects.
   if (__DEV__) {
@@ -670,11 +670,13 @@ function constructClassInstance(workInProgress, ctor, props) {
       }
     }
   }
-
+  // ! 把 state 放到 workInProgress.memoizedState 上
   const state = (workInProgress.memoizedState =
     instance.state !== null && instance.state !== undefined
       ? instance.state
       : null);
+
+  // ! 將 workInProgress 和類的實例互相綁定，
   adoptClassInstance(workInProgress, instance);
 
   if (__DEV__) {

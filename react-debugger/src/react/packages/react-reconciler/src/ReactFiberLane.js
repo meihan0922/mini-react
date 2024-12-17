@@ -191,6 +191,7 @@ function getHighestPriorityLanes(lanes) {
 }
 
 export function getNextLanes(root, wipLanes) {
+  // ! 沒任務了 跳出
   // Early bailout if there's no pending work left.
   const pendingLanes = root.pendingLanes;
   if (pendingLanes === NoLanes) {
@@ -204,18 +205,23 @@ export function getNextLanes(root, wipLanes) {
 
   // Do not work on any idle work until all the non-idle work has finished,
   // even if the work is suspended.
+  // ! 在待處理的任務中，檢查是否有閒置任務以外的任務，先執行
   const nonIdlePendingLanes = pendingLanes & NonIdleLanes;
   if (nonIdlePendingLanes !== NoLanes) {
+    // ! 去除掛起的任務
     const nonIdleUnblockedLanes = nonIdlePendingLanes & ~suspendedLanes;
     if (nonIdleUnblockedLanes !== NoLanes) {
+      // ! 有待掛起的任務，獲取最高等級的任務
       nextLanes = getHighestPriorityLanes(nonIdleUnblockedLanes);
     } else {
+      // ! 都掛起了，找到最高優先的執行
       const nonIdlePingedLanes = nonIdlePendingLanes & pingedLanes;
       if (nonIdlePingedLanes !== NoLanes) {
         nextLanes = getHighestPriorityLanes(nonIdlePingedLanes);
       }
     }
   } else {
+    // ! 只剩下閒置任務
     // The only remaining work is Idle.
     const unblockedLanes = pendingLanes & ~suspendedLanes;
     if (unblockedLanes !== NoLanes) {
@@ -228,6 +234,7 @@ export function getNextLanes(root, wipLanes) {
   }
 
   if (nextLanes === NoLanes) {
+    // ! 沒有任務
     // This should only be reachable if we're suspended
     // TODO: Consider warning in this path if a fallback timer is not scheduled.
     return NoLanes;
@@ -469,11 +476,12 @@ export function includesBlockingLane(root, lanes) {
     // Concurrent updates by default always use time slicing.
     return false;
   }
+  // ! 這四種都是同步模式執行
   const SyncDefaultLanes =
     InputContinuousHydrationLane |
     InputContinuousLane |
     DefaultHydrationLane |
-    DefaultLane; // 初次渲染
+    DefaultLane; // ! 初次渲染
   return (lanes & SyncDefaultLanes) !== NoLanes;
 }
 
@@ -617,19 +625,20 @@ export function markRootPinged(root, pingedLanes) {
 }
 
 export function markRootFinished(root, remainingLanes) {
+  // ! 已經執行過的
   const noLongerPendingLanes = root.pendingLanes & ~remainingLanes;
-
+  // ! 將剩下的優先級加入等待執行優先級中
   root.pendingLanes = remainingLanes;
 
   // Let's try everything again
   root.suspendedLanes = NoLanes;
   root.pingedLanes = NoLanes;
 
+  // ! 清除掉已經執行過的
   root.expiredLanes &= remainingLanes;
-
   root.entangledLanes &= remainingLanes;
-
   root.errorRecoveryDisabledLanes &= remainingLanes;
+
   root.shellSuspendCounter = 0;
 
   const entanglements = root.entanglements;
@@ -637,6 +646,7 @@ export function markRootFinished(root, remainingLanes) {
   const hiddenUpdates = root.hiddenUpdates;
 
   // Clear the lanes that no longer have pending work
+  // ! 取出已經執行的優先級，清空數據
   let lanes = noLongerPendingLanes;
   while (lanes > 0) {
     const index = pickArbitraryLaneIndex(lanes);

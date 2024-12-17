@@ -48,12 +48,15 @@ export function precacheFiberNode(hostInst, node) {
   node[internalInstanceKey] = hostInst;
 }
 
+// ! 來識別這個DOM 以及作為一個root 來使用，如果後續再次將這個DOM 作為一個root 傳入render 的話，React 就可以透過這個屬性來判斷是否是重用
+// ! 這個特殊屬性要使用隨機數是防止和業務代碼的屬性名衝突，起著類似symbol 的效果
 export function markContainerAsRoot(hostRoot, node) {
   // $FlowFixMe[prop-missing]
   node[internalContainerInstanceKey] = hostRoot;
 }
 
-// 取消標記，在 ReactDOMRoot.prototype.unmount 函數裡面調用
+// ! 取消標記，在 ReactDOMRoot.prototype.unmount 函數裡面調用
+// ! DOM 不再被判定為一個根節點了
 export function unmarkContainerAsRoot(node) {
   // $FlowFixMe[prop-missing]
   node[internalContainerInstanceKey] = null;

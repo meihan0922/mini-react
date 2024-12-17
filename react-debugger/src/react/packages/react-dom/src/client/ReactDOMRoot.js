@@ -158,7 +158,7 @@ ReactDOMHydrationRoot.prototype.unmount = ReactDOMRoot.prototype.unmount =
   };
 
 /**
- * 創造根節點容器
+ * ! 創造根節點容器
  * @param {*} container: Element | Document | DocumentFragment 渲染的容器 必須要是 dom element
  * @param {*} options?
  *   可選： onRecoverableError - 回調函式，在 react 從異常錯誤中恢復時調用
@@ -167,7 +167,7 @@ ReactDOMHydrationRoot.prototype.unmount = ReactDOMRoot.prototype.unmount =
  *
  * 1. 檢查 container 是 DOM 嗎？看是否要報錯。
  * 2. 檢查 options
- * 3. **createContainer 創建 FiberRoot，即源碼裡面的 root，也就是根節點**
+ * ! 3. createContainer 創建 FiberRoot，即源碼裡面的 root，也就是根節點
  * 4. 返回 React.DOMRoot 實例
  */
 export function createRoot(container, options) {
@@ -177,13 +177,14 @@ export function createRoot(container, options) {
     throw new Error("createRoot(...): Target container is not a DOM element.");
   }
 
+  // 如果傳入 body 或是已經使用的元素，會發出警告
   warnIfReactDOMContainerInDEV(container);
 
   let isStrictMode = false;
-  let concurrentUpdatesByDefaultOverride = false;
-  let identifierPrefix = "";
-  let onRecoverableError = defaultOnRecoverableError;
-  let transitionCallbacks = null;
+  let concurrentUpdatesByDefaultOverride = false; // 設置更新模式
+  let identifierPrefix = ""; // 前綴
+  let onRecoverableError = defaultOnRecoverableError; // 可恢復的錯誤處理方法
+  let transitionCallbacks = null; // 過度調度
 
   if (options !== null && options !== undefined) {
     if (__DEV__) {
@@ -207,33 +208,38 @@ export function createRoot(container, options) {
         }
       }
     }
+    // 設置嚴格模式
     if (options.unstable_strictMode === true) {
       isStrictMode = true;
     }
+    // 設置模式
     if (
       allowConcurrentByDefault &&
       options.unstable_concurrentUpdatesByDefault === true
     ) {
       concurrentUpdatesByDefaultOverride = true;
     }
+    // 設置前綴
     if (options.identifierPrefix !== undefined) {
       identifierPrefix = options.identifierPrefix;
     }
+    // 設置可恢復的錯誤處理回調
     if (options.onRecoverableError !== undefined) {
       onRecoverableError = options.onRecoverableError;
     }
+    // 設置過度回調
     if (options.unstable_transitionCallbacks !== undefined) {
       transitionCallbacks = options.unstable_transitionCallbacks;
     }
   }
 
-  // 創建 rootFiber 和 fiberRoot，把他們關聯起來，循環構造，最後返回 FiberRoot
+  // ! 創建 rootFiber 和 fiberRoot，把他們關聯起來，循環構造，最後返回 FiberRoot
   // FiberRoot.current = rootFiber;
   // rootFiber.stateNode = FiberRoot;
   const root = createContainer(
     container,
     /**
-     * 放好是 concurrent，
+     * 放好是 concurrent（1)，
      * 在 createHostRootFiber 會根據這個 tag 指定模式
      * 在 updateContainer 中，requestUpdateLane 會依照
      * 是否是過度更新 或是 是內部更新 （比如 flushSync | setState
@@ -252,6 +258,7 @@ export function createRoot(container, options) {
   );
 
   /**
+   * ! 將 root 掛載到 DOM 上
    * 紀錄 containerNode （ex: div#root）是根 Fiber
    * containerNode['__reactContainer$' + randomKey] = root.current // rootFiber
    * 後續用於 getClosestInstanceFromNode 和 getInstanceFromNode 中，用於根據根 DOM 取 Fiber 值
@@ -262,7 +269,7 @@ export function createRoot(container, options) {
   // 看是不是註釋節點，只是為了兼容 FB 的老代碼
   const rootContainerElement =
     container.nodeType === COMMENT_NODE ? container.parentNode : container;
-  // 事件代理，在 container 加上原生事件，通過事件冒泡捕捉具體內容
+  // ! 事件代理，在 container 綁定所有原生事件，通過事件冒泡捕捉具體內容
   listenToAllSupportedEvents(rootContainerElement);
 
   /** 實例化！上面有 render, unmount 方法
@@ -279,6 +286,7 @@ export function createRoot(container, options) {
   //   "color: #007acc;",
   //   root
   // );
+  // ! 初始化 ReactDOMRoot
   return new ReactDOMRoot(root);
 }
 

@@ -135,10 +135,12 @@ export function createFiberRoot(
     identifierPrefix,
     onRecoverableError
   );
+  // 服務端渲染回調
   if (enableSuspenseCallback) {
     root.hydrationCallbacks = hydrationCallbacks;
   }
 
+  // 設置過度回調
   if (enableTransitionTracing) {
     root.transitionCallbacks = transitionCallbacks;
   }
@@ -153,10 +155,11 @@ export function createFiberRoot(
     concurrentUpdatesByDefaultOverride
   );
   // !重點：循環構造
-  // 建立 fiberRoot 和 rootFiber 的關係
-  root.current = uninitializedFiber; // fiberRootNode.current => Fiber
-  uninitializedFiber.stateNode = root; // FiberRoot.stateNode => fiberRootNode
+  // ! 建立 fiberRoot 和 rootFiber 的關係
+  root.current = uninitializedFiber; // ! fiberRootNode.current => Fiber
+  uninitializedFiber.stateNode = root; // ! FiberRoot.stateNode => fiberRootNode
 
+  // 設置 HostRootFiber 的 memoizedState
   if (enableCache) {
     const initialCache = createCache();
     retainCache(initialCache);
@@ -185,7 +188,7 @@ export function createFiberRoot(
     uninitializedFiber.memoizedState = initialState;
   }
   /**
-   * 初始化 fiber.updateQueue，在初次渲染 createRoot 和類組件初次掛載 mountClassInstance 的時候都會調用
+   * ! 初始化 fiber.updateQueue，在初次渲染 createRoot 和類組件初次掛載 mountClassInstance 的時候都會調用
    * 之後更新才能放進去，
    * 一個 fiber 可以有多個更新，但最終是批量處理
    * 先儲存到 fiber 的 updateQueue 上

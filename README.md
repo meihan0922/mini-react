@@ -433,9 +433,11 @@ export type Fiber = {|
   // Effect
   // 標記做什麼修改，比方新增、插入、更新
   // 是二進制，組合性有唯一性，可以組合插入加上更新
+  // 對當前節點的處理
   flags: Flags,
+  // 對子節點的處理
   subtreeFlags: Flags,
-  // 紀錄要刪除的節點
+  // 紀錄要刪除的子節點列表
   deletions: Array<Fiber> | null,
 
   // Singly linked list fast path to the next fiber with side-effects.
@@ -3408,8 +3410,6 @@ function reconcileChildrenArray(
   let previousNewFiber: Fiber | null = null;
   // oldFiber.sibling
   let nextOldFiber = null;
-  // 用來記錄最後一個，新節點相對於老節點 不變的位置
-  let lastPlacedIndex = 0;
   let lastPlacedIndex = 0; // 一個基準！用來記錄最後一個，新節點相對於老節點 不變的位置
 
   // 1. 從左邊往右邊遍歷，按照位置比較，如果可以復用，就復用。不能復用就退出當前循環

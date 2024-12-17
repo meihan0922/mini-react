@@ -847,13 +847,11 @@ export function resetHooksOnUnwind(workInProgress) {
 // ! 掛載階段沒辦法復用，直接創建
 function mountWorkInProgressHook() {
   const hook = {
-    memoizedState: null,
-
-    baseState: null,
-    baseQueue: null,
-    queue: null,
-
-    next: null,
+    memoizedState: null, // 上次渲染用的 state
+    baseState: null, // 已經處理的 update 計算出來的 state
+    baseQueue: null, // 還沒處理的 update 隊列（上一次還沒處理完的
+    queue: null, // 當前的 update 隊列
+    next: null, // 指向下一個 hook
   };
 
   if (workInProgressHook === null) {
@@ -877,7 +875,7 @@ function updateWorkInProgressHook() {
   // render phase update. It assumes there is either a current hook we can
   // clone, or a work-in-progress hook from a previous render pass that we can
   // use as a base.
-  // ! 1. 移動 currentHook 指針
+  // ! 1. 拿 current 樹上的 hook 鏈表
   let nextCurrentHook;
   if (currentHook === null) {
     const current = currentlyRenderingFiber.alternate;
@@ -889,7 +887,7 @@ function updateWorkInProgressHook() {
   } else {
     nextCurrentHook = currentHook.next;
   }
-  // ! 2. 移動 workInProgressHook 指針
+  // ! 2. 拿 workInProgress 樹上的 hook 鏈表
   let nextWorkInProgressHook;
   if (workInProgressHook === null) {
     nextWorkInProgressHook = currentlyRenderingFiber.memoizedState;
@@ -897,8 +895,8 @@ function updateWorkInProgressHook() {
     nextWorkInProgressHook = workInProgressHook.next;
   }
 
+  // ! 如果 nextWorkInProgressHook 不為空，直接使用
   if (nextWorkInProgressHook !== null) {
-    // 渲染時更新: 先不討論
     // There's already a work-in-progress. Reuse it.
     workInProgressHook = nextWorkInProgressHook;
     nextWorkInProgressHook = workInProgressHook.next;
@@ -906,7 +904,7 @@ function updateWorkInProgressHook() {
     currentHook = nextCurrentHook;
   } else {
     // Clone from the current hook.
-
+    // ! 不然就複製 currentHook
     if (nextCurrentHook === null) {
       const currentFiber = currentlyRenderingFiber.alternate;
       if (currentFiber === null) {

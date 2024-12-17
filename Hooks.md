@@ -1,5 +1,154 @@
 # hooks
 
+## renderWithHooks
+
+在一開始，尋找 hooks 的源頭，發現不管是哪一個 hook 都是調用 `resolveDispatcher`，
+
+> react-debugger/src/react/packages/react/src/ReactHooks.js
+
+```ts
+export function useState(initialState) {
+  const dispatcher = resolveDispatcher();
+  return dispatcher.useState(initialState);
+}
+
+export function useReducer(reducer, initialArg, init) {
+  const dispatcher = resolveDispatcher();
+  return dispatcher.useReducer(reducer, initialArg, init);
+}
+
+export function useRef(initialValue) {
+  const dispatcher = resolveDispatcher();
+  return dispatcher.useRef(initialValue);
+}
+
+export function useEffect(create, deps) {
+  const dispatcher = resolveDispatcher();
+  return dispatcher.useEffect(create, deps);
+}
+// ... 省略
+```
+
+往上朔，會發現他是取 `ReactCurrentDispatcher.current`
+
+> react-debugger/src/react/packages/react/src/ReactHooks.js
+
+```ts
+function resolveDispatcher() {
+  // console.log("ReactCurrentDispatcher", ReactCurrentDispatcher);
+  const dispatcher = ReactCurrentDispatcher.current;
+
+  // Will result in a null access error if accessed outside render phase. We
+  // intentionally don't throw our own error because this is in a hot path.
+  // Also helps ensure this is inlined.
+  return dispatcher;
+}
+```
+
+而這個變數存在在 `react-debugger/src/react/packages/react/src/ReactHooks.js`，在 `renderWithHooks` 會判斷是在更新或是初始化階段，賦予不同的值。
+
+```ts
+export function renderWithHooks(
+  current,
+  workInProgress,
+  Component,
+  props,
+  secondArg,
+  nextRenderLanes
+) {
+  // ! 1. 設定全域變數
+  // 紀錄到變量當中，現在執行到哪個 fiber ，因為 workInProgress 不存在在這個文件作用域中
+  renderLanes = nextRenderLanes;
+  currentlyRenderingFiber = workInProgress;
+
+  // ! 初始化，清除目前fiber的遺留狀態
+  // ! 每次函式組件執行時，會重新設定
+  workInProgress.memoizedState = null;
+  workInProgress.updateQueue = null;
+  workInProgress.lanes = NoLanes;
+
+  // The following should have already been reset
+  // currentHook = null;
+  // workInProgressHook = null;
+
+  // didScheduleRenderPhaseUpdate = false;
+  // localIdCounter = 0;
+  // thenableIndexCounter = 0;
+  // thenableState = null;
+
+  // TODO Warn if no hooks are used at all during mount, then some are used during update.
+  // Currently we will identify the update render as a mount because memoizedState === null.
+  // This is tricky because it's valid for certain types of components (e.g. React.lazy)
+
+  // Using memoizedState to differentiate between mount/update only works if at least one stateful hook is used.
+  // Non-stateful hooks (e.g. context) don't get added to memoizedState,
+  // so memoizedState would be null during updates and mounts.
+  if (__DEV__) {
+    // 省略
+  } else {
+    // ! 2. 呼叫function
+    // ! 如果組件是初次掛載，回傳的物件對應的 hooks api 是 for mount 的
+    // ! 如果組件是更新，回傳的物件對應的 hooks api 是 for update 的
+    // ! 雖然對於使用者來說，都是一樣叫做 useState || useEffect 但實際執行的函式有變化
+    ReactCurrentDispatcher.current =
+      current === null || current.memoizedState === null
+        ? HooksDispatcherOnMount
+        : HooksDispatcherOnUpdate;
+  }
+
+  // ! 函式執行，產生子 ReactElement
+  let children = Component(props, secondArg);
+
+  // 省略
+
+  // ! 3. 把全局變量再重置
+  finishRenderingHooks(current, workInProgress, Component);
+
+  return children;
+}
+```
+
+主要是看這段
+
+```ts
+ReactCurrentDispatcher.current =
+  current === null || current.memoizedState === null
+    ? HooksDispatcherOnMount
+    : HooksDispatcherOnUpdate;
+```
+
+```ts
+const HooksDispatcherOnMount: Dispatcher = {
+  ...
+  useCallback: mountCallback,
+  useContext: readContext,
+  useEffect: mountEffect,
+  useImperativeHandle: mountImperativeHandle,
+  useLayoutEffect: mountLayoutEffect,
+  useMemo: mountMemo,
+  useReducer: mountReducer,
+  useRef: mountRef,
+  useState: mountState,
+  ...
+};
+
+const HooksDispatcherOnUpdate: Dispatcher = {
+  ...
+  useCallback: updateCallback,
+  useContext: readContext,
+  useEffect: updateEffect,
+  useImperativeHandle: updateImperativeHandle,
+  useLayoutEffect: updateLayoutEffect,
+  useMemo: updateMemo,
+  useReducer: updateReducer,
+  useRef: updateRef,
+  useState: updateState,
+  ...
+};
+```
+
+初始時，都會調用 `mountWorkInProgressHook`，會創建 hook，在此之前先來講 hook 的結構和型別
+
 ## 型別
 
 ```ts
@@ -23,7 +172,7 @@
   export type Hook = {
     // 不同類型的 hook，存的內容不同
     // useState / useReducer 存 state，
-    // useEffect / useLayoutEffect 存 effect 單向循環鏈表
+    // useEffect / useLayoutEffect 存 effect 單向循環鏈表，指向最後一個 effect
     memorizedState: any;
 
     // 下一個 hook，如果是 null，表示他是最後一個 hook
@@ -31,9 +180,380 @@
 
     baseState: any; // 所有的 update 對象合併後的狀態（比方說setState多次調用
     baseQueue: Update<any, any> | null; // 環形鏈表，只有包含高於本次渲染優先級的 update對象
-    queue:  UpdateQueue < any , any > | null; // 包括所有優先級的 update 對象
+    queue:  UpdateQueue <any , any > | null; // 包括所有優先級的 update 對象
+  };
+
+  export type FunctionComponentUpdateQueue = {|
+    lastEffect: Effect | null, // 單向循環鏈表
+    stores: Array<StoreConsistencyCheck<any>> | null,
+  |};
+
+  type Effect = {
+    tag: HookFlags; // 標記 Hook 類型
+    create: () => (() => void) | void; // 就是放在 useEffect 和 useLayoutEffect 的第一個參數
+    destroy: (() => void) | void; // 就是放在 useEffect 和 useLayoutEffect 的第一個參數回傳的函式
+    deps: Array<any> | void | null; // 依賴項
+    next: null | Effect; // 指向下一個 effect，是單向循環鏈表
   };
 ```
+
+注意：`狀態 hooks` 使用 fiber.memorizedState 內儲存的狀態 hook 自己的 queue 和 baseState、baseQueue，但 `effect hooks` 用 hook.memorizedState 儲存 effect 單向循環鏈表，還有使用 fiber.updateQueue， 在儲存內部的函式和依賴項。
+
+## 初始化 hook - mountWorkInProgressHook
+
+初始化時調用 `mountWorkInProgressHook`，每種 hooks 需要保存不一樣的值
+
+```ts
+// ! 掛載階段沒辦法復用，直接創建
+function mountWorkInProgressHook() {
+  const hook = {
+    memoizedState: null, // 上次渲染用的 state
+    baseState: null, // 已經處理的 update 計算出來的 state
+    baseQueue: null, // 還沒處理的 update 隊列（上一次還沒處理完的
+    queue: null, // 當前的 update 隊列
+    next: null, // 指向下一個 hook
+  };
+
+  if (workInProgressHook === null) {
+    // This is the first hook in the list
+    // ! 現在是第 0 個 hook，是頭節點，currentlyRenderingFiber 指向 workInProgress
+    // ! 把 workInProgressHook 掛載到 fiber.memoizedState 上面
+    currentlyRenderingFiber.memoizedState = workInProgressHook = hook;
+  } else {
+    // Append to the end of the list
+    // ! 是單鏈表用 next 鏈接
+    workInProgressHook = workInProgressHook.next = hook;
+  }
+  return workInProgressHook;
+}
+```
+
+## 更新 hook - updateWorkInProgressHook
+
+更新時，都會調用 `updateWorkInProgressHook`
+
+- fiber 樹有兩顆對應新舊， hooks 也有兩個鏈表對應新舊，當需要更新一個 hook 時，使用 `nextCurrentHook` 和 `nextWorkInProgressHook` 來識別下一個 hook，如果新的 `nextWorkInProgressHook` 存在，直接使用它，不然就複製 `currentHook` 來用。
+
+```ts
+// ! 移動 currentHook workInProgressHook 指針，
+// ! renderWithHooks 中設定 workInProgress.memoizedState = null，
+// ! workInProgressHook 一開始也是 null，只能從 currentHook clone
+// ! clone 過來的 newHook.next = null，所以 workInProgressHook 會完全重建
+function updateWorkInProgressHook() {
+  // This function is used both for updates and for re-renders triggered by a
+  // render phase update. It assumes there is either a current hook we can
+  // clone, or a work-in-progress hook from a previous render pass that we can
+  // use as a base.
+  // ! 1. 拿 current 樹上的 hook 鏈表
+  let nextCurrentHook;
+  if (currentHook === null) {
+    const current = currentlyRenderingFiber.alternate;
+    if (current !== null) {
+      nextCurrentHook = current.memoizedState;
+    } else {
+      nextCurrentHook = null;
+    }
+  } else {
+    nextCurrentHook = currentHook.next;
+  }
+  // ! 2. 拿 workInProgress 樹上的 hook 鏈表
+  let nextWorkInProgressHook;
+  if (workInProgressHook === null) {
+    nextWorkInProgressHook = currentlyRenderingFiber.memoizedState;
+  } else {
+    nextWorkInProgressHook = workInProgressHook.next;
+  }
+
+  // ! 如果 nextWorkInProgressHook 不為空，直接使用
+  if (nextWorkInProgressHook !== null) {
+    // There's already a work-in-progress. Reuse it.
+    workInProgressHook = nextWorkInProgressHook;
+    nextWorkInProgressHook = workInProgressHook.next;
+
+    currentHook = nextCurrentHook;
+  } else {
+    // Clone from the current hook.
+    // ! 不然就複製 currentHook
+    if (nextCurrentHook === null) {
+      const currentFiber = currentlyRenderingFiber.alternate;
+      if (currentFiber === null) {
+        // This is the initial render. This branch is reached when the component
+        // suspends, resumes, then renders an additional hook.
+        // Should never be reached because we should switch to the mount dispatcher first.
+        throw new Error(
+          "Update hook called on initial render. This is likely a bug in React. Please file an issue."
+        );
+      } else {
+        // This is an update. We should always have a current hook.
+        throw new Error("Rendered more hooks than during the previous render.");
+      }
+    }
+
+    currentHook = nextCurrentHook;
+    // ! 3. 複製 currentHook 作為新的 workInProgressHook.
+    // ! 之後邏輯和 mountWorkInProgressHook 一致
+    const newHook = {
+      memoizedState: currentHook.memoizedState,
+
+      baseState: currentHook.baseState,
+      baseQueue: currentHook.baseQueue,
+      queue: currentHook.queue,
+
+      next: null, // ! 預設是 null
+    };
+
+    if (workInProgressHook === null) {
+      // This is the first hook in the list.
+      currentlyRenderingFiber.memoizedState = workInProgressHook = newHook;
+    } else {
+      // Append to the end of the list.
+      workInProgressHook = workInProgressHook.next = newHook;
+    }
+  }
+  return workInProgressHook;
+}
+```
+
+也因為要 hooks 鏈表需要複製使用，要確保順序一樣，但鏈表又沒有下標，因此完全不能在 hook 外部使用條件句或是在循環中呼叫，需要將函式放在頂層。否則會產生不可預期的結果。
+
+## 緩存 hooks - useCallback, useMemo
+
+我們都知道 `useCallback` 的參數長這樣：
+
+```ts
+useCallback(fn, dependencies);
+```
+
+如果依賴項沒有變化，就會回傳一樣的 fn。 依賴項會使用 `Object.is` 比較每一個和先前的值是否一致。
+通常會和 react.memo 做搭配使用，函式以 props 傳入子組件，因為 memo 是透過校驗 props 的記憶體位置來判定是否相同（傳址），只要物件位址一致就不會觸發渲染。
+
+他的源碼很簡潔，在初始時，記憶參數到 `memoizedState` 上，更新時，比較依賴項，回傳快取的函式，不然把新的替換上 `memoizedState`
+
+```ts
+function mountCallback(callback, deps) {
+  const hook = mountWorkInProgressHook();
+  const nextDeps = deps === undefined ? null : deps;
+  hook.memoizedState = [callback, nextDeps];
+  return callback;
+}
+
+function updateCallback(callback, deps) {
+  const hook = updateWorkInProgressHook();
+  const nextDeps = deps === undefined ? null : deps;
+  const prevState = hook.memoizedState;
+  if (nextDeps !== null) {
+    const prevDeps = prevState[1];
+    if (areHookInputsEqual(nextDeps, prevDeps)) {
+      return prevState[0];
+    }
+  }
+  hook.memoizedState = [callback, nextDeps];
+  return callback;
+}
+
+function areHookInputsEqual(nextDeps, prevDeps) {
+  if (prevDeps === null) {
+    return false;
+  }
+
+  // $FlowFixMe[incompatible-use] found when upgrading Flow
+  for (let i = 0; i < prevDeps.length && i < nextDeps.length; i++) {
+    // $FlowFixMe[incompatible-use] found when upgrading Flow
+    if (is(nextDeps[i], prevDeps[i])) {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+```
+
+同樣的原理套用在 `useMemo` 上
+
+```ts
+const cachedValue = useMemo(calculateValue, dependencies);
+```
+
+```ts
+function mountMemo(nextCreate, deps) {
+  const hook = mountWorkInProgressHook();
+  const nextDeps = deps === undefined ? null : deps;
+  if (shouldDoubleInvokeUserFnsInHooksDEV) {
+    nextCreate();
+  }
+  const nextValue = nextCreate();
+  hook.memoizedState = [nextValue, nextDeps];
+  return nextValue;
+}
+
+function updateMemo(nextCreate, deps) {
+  const hook = updateWorkInProgressHook();
+  const nextDeps = deps === undefined ? null : deps;
+  const prevState = hook.memoizedState;
+  // Assume these are defined. If they're not, areHookInputsEqual will warn.
+  if (nextDeps !== null) {
+    const prevDeps = prevState[1];
+    if (areHookInputsEqual(nextDeps, prevDeps)) {
+      return prevState[0];
+    }
+  }
+  const nextValue = nextCreate(); // ! 主要差異是要執行結果再緩存
+  hook.memoizedState = [nextValue, nextDeps];
+  return nextValue;
+}
+```
+
+### 順便看 memo 源碼
+
+在 `beginWork` 中，會特別處理
+
+```ts
+switch (workInProgress.tag) {
+  // 省略
+  case MemoComponent: {
+    const type = workInProgress.type;
+    const unresolvedProps = workInProgress.pendingProps;
+    // Resolve outer props first, then resolve inner props.
+    let resolvedProps = resolveDefaultProps(type, unresolvedProps); // type 是 memo 包裹的組件
+    resolvedProps = resolveDefaultProps(type.type, resolvedProps); // type.type 是指自己的組件
+    return updateMemoComponent(
+      current,
+      workInProgress,
+      type,
+      resolvedProps,
+      renderLanes
+    );
+  }
+  // 省略
+}
+
+function updateMemoComponent(
+  current: Fiber | null,
+  workInProgress: Fiber,
+  Component: any,
+  nextProps: any,
+  renderLanes: Lanes
+): null | Fiber {
+  if (current === null) {
+    //省略
+    const prevProps = currentChild.memoizedProps;
+    let compare = Component.compare; // 可以傳入自定義的比較函式
+    compare = compare !== null ? compare : shallowEqual; // 這個是淺層比較，比較每一個 props 用 Object.is 判定，如果是基本型別一樣就不會重繪，如果是物件型別要位址一樣
+    // 如果一樣就復用之前的
+    if (compare(prevProps, nextProps) && current.ref === workInProgress.ref) {
+      return bailoutOnAlreadyFinishedWork(current, workInProgress, renderLanes);
+    }
+  }
+  workInProgress.flags |= PerformedWork;
+  const newChild = createWorkInProgress(currentChild, nextProps);
+  newChild.ref = workInProgress.ref;
+  newChild.return = workInProgress;
+  workInProgress.child = newChild;
+  return newChild;
+}
+```
+
+為什麼會呼叫兩次 `resolveDefaultProps` ?
+
+```ts
+const MyComponent = (props) => {
+  return <div>{props.name}</div>;
+};
+
+MyComponent.defaultProps = {
+  name: "Default Name",
+};
+
+const MemoizedComponent = React.memo(MyComponent);
+
+MemoizedComponent.defaultProps = {
+  name: "Memoized Default Name",
+};
+```
+
+因為可能會有兩層自己的 props，
+
+## 緩存 hooks - useRef
+
+有兩種用法，存緩存的值或是存 DOM 物件。每次渲染時，都會回傳同一個物件，但 ref 並不會觸發重新渲染。
+
+```ts
+function mountRef(initialValue) {
+  const hook = mountWorkInProgressHook();
+
+  // 省略
+  const ref = { current: initialValue };
+  hook.memoizedState = ref;
+  return ref;
+}
+
+function updateRef(initialValue) {
+  const hook = updateWorkInProgressHook();
+  return hook.memoizedState;
+}
+```
+
+ref 是可以操作 DOM 的，所以要怎麼綁定？在哪裡綁？
+
+在一開始從 reactElement -> fiber 時，處理 props 就有單獨對 ref 做處理，在 `useRef` 或 `createRef` 傳入的，同步到 fiber 上。
+`beginWork` 時，會在 `flags` 上標記，在 `completeWork` 也有另一個標記函式做同樣的事情！之後在處理時，可以進行相關的操作。
+
+進入 commit
+
+- `commitMutationEffectsOnFiber`: 會進行遞歸處理刪除，並且呼叫 `safelyDetachRef`，判定 ref 是否是函式，如果是：則是類組件 `createRef` 創造的，則呼叫他 `ref(null)`，把內部直設定成空; 如果不是：就把 `useRef` 值設定成 null。
+- `commitLayoutEffect`: 會操作真實 DOM，如果 `flags` 有標記，則處理綁定 DOM(原生節點的話) 或是 `fiber.stateNode` 或是實例。
+
+### 總結
+
+- createRef 是每次渲染時重新創建的，所以每次渲染都會得到一個新的 ref 物件。useRef 返回的物件引用是固定的，它在組件渲染期間保持不變，只能改變 .current 的內容。
+- 如果 useRef 被用來指向某個 DOM 節點，它的賦值和重置會發生在 React 的 commit 階段。
+- useRef 作為一個 "容器" 存儲可變的值，在組件的生命週期內持續存在。不會觸發組件重新渲染，不會在組件重新渲染時重置或丟失。
+
+### 另補充 forwardRef
+
+能夠將其接受的 ref 屬性轉送到其元件樹下的另一個元件中。
+
+- 它解決了組件封裝時，父組件需要訪問子組件內部 DOM 或方法的問題。在高階組件中，中間隔了一層，傳遞 ref 會失敗
+
+- 函數組件不支持 ref，需要 forwardRef 來將 ref 從父組件傳遞給子組件內部的 DOM 元素或組件實例。
+
+- 配合 useImperativeHandle 可以提供更靈活的自定義接口，讓 ref 暴露更多可控功能。
+
+```ts
+import React, { useRef, forwardRef, useImperativeHandle } from "react";
+
+const CustomInput = forwardRef((props, ref) => {
+  const inputRef = useRef();
+
+  // 自定義暴露給父組件的 ref 方法和屬性
+  useImperativeHandle(ref, () => ({
+    focus: () => {
+      inputRef.current.focus();
+    },
+    clear: () => {
+      inputRef.current.value = "";
+    },
+  }));
+
+  return <input ref={inputRef} />;
+});
+
+const App = () => {
+  const inputRef = useRef();
+
+  return (
+    <div>
+      <CustomInput ref={inputRef} />
+      <button onClick={() => inputRef.current.focus()}>Focus</button>
+      <button onClick={() => inputRef.current.clear()}>Clear</button>
+    </div>
+  );
+};
+
+export default App;
+```
+
+## 狀態 hooks - useState, useReducer
 
 ```mermaid
 graph TD
@@ -673,8 +1193,20 @@ function updateReducerImpl(hook, current, reducer) {
 }
 ```
 
+### 優先級問題
+
 如果現在有優先級較低的 update3, update4，優先級較高的 update1, update2
 並且在 fiber.memorized.baseQueue 上的鏈表是 update1 -> update3 -> update4 -> update2，會先處理高優先級，變成 2，之後合併渲染成 4。
-最終結果等於 update 鏈表按順序合併。
+最終結果等於 update 鏈表**按順序合併**。
+
+另外，`baseState` 是 commit `的結果，memoizedState` 是最後一次渲染計算的狀態結果。
+確保在高優先級打斷當前渲染時，可以回退到一個穩定的狀態，比方說：
+
+```ts
+const [state, setState] = useState(0);
+setState(1); // 低優先級
+setState(2); // 高優先級
+setState(3); // 低優先級
+```
 
 ![hookstate](./assets/hooksState.png)

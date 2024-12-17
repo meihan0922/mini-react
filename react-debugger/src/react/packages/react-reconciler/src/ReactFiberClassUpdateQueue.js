@@ -580,6 +580,7 @@ export function processUpdateQueue(
       // Check if this update was made while the tree was hidden. If so, then
       // it's not a "base" update and we should disregard the extra base lanes
       // that were added to renderLanes when we entered the Offscreen tree.
+      // ! 判斷更新對像上的lane 是否存在於renderLanes subtreeRenderLanes 上，
       const shouldSkipUpdate = isHiddenUpdate
         ? !isSubsetOfLanes(getWorkInProgressRootRenderLanes(), updateLane)
         : !isSubsetOfLanes(renderLanes, updateLane);
@@ -607,7 +608,7 @@ export function processUpdateQueue(
           newLastBaseUpdate = newLastBaseUpdate.next = clone;
         }
         // Update the remaining priority in the queue.
-        // 更新 lane， 他下次遍歷到時才能執行
+        // ! 更新 lane， 他下次遍歷到時才能執行
         newLanes = mergeLanes(newLanes, updateLane);
       } else {
         // This update does have sufficient priority.

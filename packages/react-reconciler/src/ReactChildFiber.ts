@@ -11,7 +11,7 @@ import {
 import { ChildDeletion, Placement } from "./ReactFiberFlags";
 import type { Fiber } from "./ReactInternalTypes";
 import { isArray, isStr } from "@mono/shared/utils";
-import { HostText } from "./ReactWorkTags";
+import { Fragment, HostText } from "./ReactWorkTags";
 
 type ChildReconciler = (
   returnFiber: Fiber,
@@ -27,7 +27,10 @@ export const mountChildFibers: ChildReconciler = createChildReconciler(false);
 
 // 協調子節點，shouldTrackSideEffect：不是初次渲染
 function createChildReconciler(shouldTrackSideEffect: boolean) {
-  function deleteRemaingChildren(returnFiber: Fiber, currentFirstChild: Fiber) {
+  function deleteRemainingChildren(
+    returnFiber: Fiber,
+    currentFirstChild: Fiber | null
+  ) {
     if (!shouldTrackSideEffect) {
       // 初次渲染
       return;
@@ -83,15 +86,27 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
     while (child !== null) {
       if (child.key === key) {
         const elementType = element.type;
-        if (child.elementType === elementType) {
-          // 復用
-          const existing = useFiber(child, element.props);
-          existing.return = returnFiber;
-          return existing;
+        if (elementType === REACT_FRAGMENT_TYPE) {
+          if (child.tag === Fragment) {
+            // 新老節點都是 Fragment
+            // 因為新的節點只有一個，才會走到 reconcileSingleElement
+            // 所以既然這個新節點是可以復用的，表示其他節點都是多餘的
+            deleteRemainingChildren(returnFiber, child.sibling);
+            const existing = useFiber(child, element.props.children);
+            existing.return = returnFiber;
+            return existing;
+          }
         } else {
-          // 同層級下 key 不應相同，沒一個可以復用，要刪除所有的剩下的child(之前的已經走到下面的 deleteChild)
-          deleteRemaingChildren(returnFiber, child);
-          break;
+          if (child.elementType === elementType) {
+            // 復用
+            const existing = useFiber(child, element.props);
+            existing.return = returnFiber;
+            return existing;
+          } else {
+            // 同層級下 key 不應相同，沒一個可以復用，要刪除所有的剩下的child(之前的已經走到下面的 deleteChild)
+            deleteRemainingChildren(returnFiber, child);
+            break;
+          }
         }
       } else {
         // delete 因為是單個節點才會進來這裡
@@ -106,9 +121,17 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
   // 只有協調單個子節點，沒有bailout
   function reconcileSingleTextNode(
     returnFiber: Fiber,
-    currentFirstChild: Fiber | null, // TODO:
-    textContent: string | number
+    currentFirstChild: Fiber | null,
+    textContent: string
   ) {
+    // update
+    if (currentFirstChild !== null && currentFirstChild.tag === HostText) {
+      deleteRemainingChildren(returnFiber, currentFirstChild.sibling);
+      const existing = useFiber(currentFirstChild, textContent);
+      existing.return = returnFiber;
+      return existing;
+    }
+    // new create
     // 強制轉型成字串，以防數字
     const created = createFiberFromText(textContent + "");
     created.return = returnFiber;
@@ -332,7 +355,7 @@ function createChildReconciler(shouldTrackSideEffect: boolean) {
 
     // 2.1 老節點還有，新節點沒了，刪除剩餘的老節點
     if (newIdx === newChildren.length) {
-      deleteRemaingChildren(returnFiber, oldFiber);
+      deleteRemainingChildren(returnFiber, oldFiber);
       return resultFirstChild;
     }
 

@@ -327,6 +327,7 @@ function createChildReconciler(shouldTrackSideEffects) {
     return existingChildren;
   }
 
+  // 複製一個節點
   function useFiber(fiber, pendingProps) {
     // We currently set sibling to null and index to 0 here because it is easy
     // to forget to do before returning it. E.g. for the single child case.
@@ -562,6 +563,7 @@ function createChildReconciler(shouldTrackSideEffects) {
     // Update the fiber if the keys match, otherwise return null.
     const key = oldFiber !== null ? oldFiber.key : null;
 
+    // 文本節點
     if (
       (typeof newChild === "string" && newChild !== "") ||
       typeof newChild === "number"
@@ -569,12 +571,14 @@ function createChildReconciler(shouldTrackSideEffects) {
       // Text nodes don't have keys. If the previous node is implicitly keyed
       // we can continue to replace it without aborting even if it is not a text
       // node.
+      // ! key 不相同
       if (key !== null) {
         return null;
       }
+      // ! 至少 key 一樣，接續判斷 type，看是要走創建或更新
       return updateTextNode(returnFiber, oldFiber, "" + newChild, lanes);
     }
-
+    // ! 如果是 ReactElement 類型，則判斷 key 是否一樣
     if (typeof newChild === "object" && newChild !== null) {
       switch (newChild.$$typeof) {
         case REACT_ELEMENT_TYPE: {
@@ -602,7 +606,8 @@ function createChildReconciler(shouldTrackSideEffects) {
         if (key !== null) {
           return null;
         }
-
+        // ! 如果新的節點是陣列或是其他迭代對象，本身是沒有 key 的。
+        // ! 則更新為 fragment 類型
         return updateFragment(returnFiber, oldFiber, newChild, lanes, null);
       }
 
@@ -815,27 +820,36 @@ function createChildReconciler(shouldTrackSideEffects) {
       }
     }
 
-    let resultingFirstChild = null;
-    let previousNewFiber = null;
+    let resultingFirstChild = null; // ! // 頭節點，也是要返回的值
+    let previousNewFiber = null; // ! 紀錄前 Fiber，後續要將 previousNewFiber sibling 指向 新 fiber
 
-    let oldFiber = currentFirstChild;
-    let lastPlacedIndex = 0;
-    let newIdx = 0;
-    let nextOldFiber = null;
-    // !
+    let oldFiber = currentFirstChild; // ! // 紀錄比對中的老 fiber，初始是頭節點
+    let lastPlacedIndex = 0; // ! 一個基準！用來記錄最後一個，新節點相對於老節點 不變的位置
+    let newIdx = 0; // ! 遍歷的索引值
+    let nextOldFiber = null; // ! 下一個 fiber 節點
+    // ! 遍歷舊的節點，直到新節點的長度，看是否可以復用
+    // ! 假設前提是順序會盡可能和原來的一樣
     for (; oldFiber !== null && newIdx < newChildren.length; newIdx++) {
       if (oldFiber.index > newIdx) {
+        // ???? 雖然源碼這樣寫，但想不到什麼時候會有這樣的狀況
+        // ???? 按照位置比，如果舊的已經超前，就跳過
         nextOldFiber = oldFiber;
         oldFiber = null;
       } else {
+        // ! 紀錄下一個 fiber
         nextOldFiber = oldFiber.sibling;
       }
+      // ! 比對新舊，看是否要復用
+      // ! 回傳 null 表示不能復用 -> 換了位置或是全新的節點
+      // ! 優先比較 key，不同會先回傳 null
+      // ! 有值表示：至少”key 相同“，看 type 如何，走創建或是復用回傳 fiber
       const newFiber = updateSlot(
         returnFiber,
         oldFiber,
         newChildren[newIdx],
         lanes
       );
+      // ! 如果 key 完全不同，跳出回圈
       if (newFiber === null) {
         // TODO: This breaks on empty slots like null children. That's
         // unfortunate because it triggers the slow path all the time. We need
@@ -846,14 +860,19 @@ function createChildReconciler(shouldTrackSideEffects) {
         }
         break;
       }
+      // ! 如果是更新階段
       if (shouldTrackSideEffects) {
+        // ! 如果 新的 fiber 在 updateSlot 中，走創建而來的
         if (oldFiber && newFiber.alternate === null) {
+          // ! 因為已經確定 key 相同，type 不同了，直接刪掉舊的節點
           // We matched the slot, but we didn't reuse the existing fiber, so we
           // need to delete the existing child.
           deleteChild(returnFiber, oldFiber);
         }
       }
+      // ! 判斷節點相對位置是否發生變化，打上標記
       lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
+      // ! 頭節點指向新的 fiber
       if (previousNewFiber === null) {
         // TODO: Move out of the loop. This only happens for the first run.
         resultingFirstChild = newFiber;
@@ -862,12 +881,15 @@ function createChildReconciler(shouldTrackSideEffects) {
         // I.e. if we had null values before, then we want to defer this
         // for each null value. However, we also don't want to call updateSlot
         // with the previous one.
+        //
+        // ! 將前一個 fiber sibling 指向當前的
         previousNewFiber.sibling = newFiber;
       }
+      // ! 移動指針
       previousNewFiber = newFiber;
       oldFiber = nextOldFiber;
     }
-
+    // ! 如果新節點長度小於舊節點，則其他舊的刪除即可
     if (newIdx === newChildren.length) {
       // We've reached the end of the new children. We can delete the rest.
       deleteRemainingChildren(returnFiber, oldFiber);
@@ -878,24 +900,29 @@ function createChildReconciler(shouldTrackSideEffects) {
       return resultingFirstChild;
     }
 
-    // ! 初次渲染
+    // ! 新節點長度大於舊的節點，（舊的所有節點都已經復用了，新節點還有剩）
     if (oldFiber === null) {
       // If we don't have any more existing children we can choose a fast path
       // since the rest will all be insertions.
+      // ! 遍歷剩下的新節點
       for (; newIdx < newChildren.length; newIdx++) {
+        // ! 直接創建
         const newFiber = createChild(returnFiber, newChildren[newIdx], lanes);
-        // 檢查是否是有效的fiber
+        // ! 檢查是否是有效的fiber
         if (newFiber === null) {
           continue;
         }
+        // ! 判斷節點相對位置是否發生變化，打上標記
         lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
         if (previousNewFiber === null) {
-          // 頭節點
+          // ! 頭節點
           // TODO: Move out of the loop. This only happens for the first run.
           resultingFirstChild = newFiber;
         } else {
+          // ! 將前一個 fiber sibling 指向當前的
           previousNewFiber.sibling = newFiber;
         }
+        // ! 移動指針
         previousNewFiber = newFiber;
       }
       if (getIsHydrating()) {
@@ -904,7 +931,7 @@ function createChildReconciler(shouldTrackSideEffects) {
       }
       return resultingFirstChild;
     }
-
+    // ! 如果新的和舊的節點都還有，建立 map 直接找對應的
     // Add all children to a key map for quick lookups.
     const existingChildren = mapRemainingChildren(returnFiber, oldFiber);
 
@@ -918,7 +945,9 @@ function createChildReconciler(shouldTrackSideEffects) {
         lanes
       );
       if (newFiber !== null) {
+        // ! 更新階段
         if (shouldTrackSideEffects) {
+          // ! 已經比對過了，所以可以瘦身，減少map的大小
           if (newFiber.alternate !== null) {
             // The new fiber is a work in progress, but if there exists a
             // current, that means that we reused the fiber. We need to delete
@@ -929,6 +958,7 @@ function createChildReconciler(shouldTrackSideEffects) {
             );
           }
         }
+        // ! 判斷節點相對位置是否發生變化，打上標記
         lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
         if (previousNewFiber === null) {
           resultingFirstChild = newFiber;
@@ -938,7 +968,7 @@ function createChildReconciler(shouldTrackSideEffects) {
         previousNewFiber = newFiber;
       }
     }
-
+    // ! 如果是更新階段，新節點已經都完成了，剩下老節點要清除
     if (shouldTrackSideEffects) {
       // Any existing children that weren't consumed above were deleted. We need
       // to add them to the deletion list.

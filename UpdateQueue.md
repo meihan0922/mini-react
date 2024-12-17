@@ -7,7 +7,7 @@
   - [總結](#--)
   - [所以， setState 為什麼是異步的？](#----setstate---------)
 
-# ClassComponent 和 HostRoot 的 UpdateQueue
+# UpdateQueue
 
 react 節點狀態儲存在 `fiber.memorizedState` 上，老節點到新節點的更新儲存在 `fiber.updateQueue` 上。不同類型節點對應的 `updateQueue` 儲存的內容格式不同。
 
@@ -34,11 +34,11 @@ export function initializeUpdateQueue(fiber) {
   const queue = {
     // 基本狀態，比方類組件初次掛載更新存初始狀態、頁面的初次渲染，root掛載就是存element
     baseState: fiber.memoizedState,
-    // ! 單鏈表的結構，會一路指向 lastBaseUpdate
+    // ! 渲染開始前state 的值，單鏈表的結構，會一路指向 lastBaseUpdate
     firstBaseUpdate: null,
     // 紀錄尾節點，一般來說是不用紀錄尾節點的，只是為了快速比較兩個單鏈表，用尾節點比較
     lastBaseUpdate: null,
-    // 新得到的 update 會放在此，處理完後，會轉移到 BaseUpdate 上
+    // 新得到的 update 會放在此，處理完後，會轉移到 BaseUpdate 上，每次調度都會判斷是否優先級足夠，不夠會儲存回 BaseUpdate
     shared: {
       pending: null, // ! 單向循環鏈表，正在掛載的更新
       lanes: NoLanes, // ! Lanes，整個 pending 的 merge

@@ -1081,7 +1081,7 @@ function updateFunctionComponent(
     hasId = checkDidRenderIdHook();
     setIsRendering(false);
   } else {
-    // * 處理 hooks，要把 hooks 和 fiber 關聯
+    // ! 處理 hooks，要把 hooks 和 fiber 關聯
     nextChildren = renderWithHooks(
       current,
       workInProgress,
@@ -1096,7 +1096,7 @@ function updateFunctionComponent(
     markComponentRenderStopped();
   }
 
-  // ! 如果是更新階段，但又沒有接到新的更新，則復用老節點，退出更新
+  // ! 如果是更新階段，但又沒有接到新的更新(props 和狀態都沒變)，則復用老節點，退出更新
   if (current !== null && !didReceiveUpdate) {
     bailoutHooks(current, workInProgress, renderLanes);
     return bailoutOnAlreadyFinishedWork(current, workInProgress, renderLanes);
@@ -1223,15 +1223,18 @@ function updateClassComponent(
   }
   prepareToReadContext(workInProgress, renderLanes);
 
-  // 類組件的實例存在 stateNode
+  // ! 類組件的實例存在 stateNode
   const instance = workInProgress.stateNode;
   let shouldUpdate;
-  // 初次掛載，還沒建立過
+  // ! 初次掛載，還沒建立過
   if (instance === null) {
+    // ! 初始化實例
     resetSuspendedCurrentOnMountInLegacyMode(current, workInProgress);
 
     // In the initial pass we might need to construct the instance.
+    // ! 創建出一個實例，將 workInProgress 與 實例綁定
     constructClassInstance(workInProgress, Component, nextProps);
+    // ! 掛載，處理生命週期：componentWillMount，設定 componentDidMount 的優先權訊息
     mountClassInstance(workInProgress, Component, nextProps, renderLanes);
     shouldUpdate = true;
   } else if (current === null) {
@@ -1243,6 +1246,7 @@ function updateClassComponent(
       renderLanes
     );
   } else {
+    // ! 判斷是否發生變化
     shouldUpdate = updateClassInstance(
       current,
       workInProgress,
@@ -1251,6 +1255,7 @@ function updateClassComponent(
       renderLanes
     );
   }
+  // ! 執行 render 方法
   const nextUnitOfWork = finishClassComponent(
     current,
     workInProgress,
@@ -1389,6 +1394,7 @@ function pushHostRootContext(workInProgress) {
 
 // current: hostRootFiber
 function updateHostRoot(current, workInProgress, renderLanes) {
+  // ! 把一些有用的信息推入内部棧
   pushHostRootContext(workInProgress);
 
   if (current === null) {
@@ -1422,6 +1428,7 @@ function updateHostRoot(current, workInProgress, renderLanes) {
 
   // Caution: React DevTools currently depends on this property
   // being called "element".
+  // ! 拿到本次要渲染的 element
   const nextChildren = nextState.element;
   if (supportsHydration && prevState.isDehydrated) {
     // This is a hydration root whose shell has not yet hydrated. We should
@@ -1508,7 +1515,7 @@ function updateHostRoot(current, workInProgress, renderLanes) {
     if (nextChildren === prevChildren) {
       return bailoutOnAlreadyFinishedWork(current, workInProgress, renderLanes);
     }
-    // ! 3. 協調子節點
+    // ! 3. 協調子節點，把子節點變成 fiber
     reconcileChildren(current, workInProgress, nextChildren, renderLanes);
   }
   return workInProgress.child;
@@ -1544,6 +1551,7 @@ function updateHostComponent(current, workInProgress, renderLanes) {
   const prevProps = current !== null ? current.memoizedProps : null;
 
   let nextChildren = nextProps.children;
+  // ! 判斷是不是文本節點，不包含其他類型的節點了
   const isDirectTextChild = shouldSetTextContent(type, nextProps);
 
   if (isDirectTextChild) {
@@ -1551,8 +1559,11 @@ function updateHostComponent(current, workInProgress, renderLanes) {
     // case. We won't handle it as a reified child. We will instead handle
     // this in the host environment that also has access to this prop. That
     // avoids allocating another HostText fiber and traversing it.
+    // ! 如果是純文本節點，沒有子節點
     nextChildren = null;
-  } else if (prevProps !== null && shouldSetTextContent(type, prevProps)) {
+  }
+  // ! 如果他之前是文本節點，現在不是，則標記重置
+  else if (prevProps !== null && shouldSetTextContent(type, prevProps)) {
     // If we're switching from a direct text child to a normal child, or to
     // empty, we need to schedule the text content to be reset.
     workInProgress.flags |= ContentReset;
@@ -1613,6 +1624,7 @@ function updateHostComponent(current, workInProgress, renderLanes) {
     }
   }
 
+  // ! 得到實例更新 ref
   markRef(current, workInProgress);
   reconcileChildren(current, workInProgress, nextChildren, renderLanes);
   return workInProgress.child;
@@ -1673,6 +1685,7 @@ function updateHostSingleton(current, workInProgress, renderLanes) {
   return workInProgress.child;
 }
 
+// ! 對應到 HostText
 function updateHostText(current, workInProgress) {
   if (current === null) {
     tryToClaimNextHydratableTextInstance(workInProgress);
@@ -3881,6 +3894,7 @@ function beginWork(current, workInProgress, renderLanes) {
     const oldProps = current.memoizedProps;
     const newProps = workInProgress.pendingProps;
 
+    // ! 對比 props 看要不要更新，如果props相等，確定沒有更新或是 context 變動，就退出，復用之前的節點
     if (
       oldProps !== newProps ||
       hasLegacyContextChanged() ||
@@ -3889,10 +3903,12 @@ function beginWork(current, workInProgress, renderLanes) {
     ) {
       // If props or context changed, mark the fiber as having performed work.
       // This may be unset if the props are determined to be equal later (memo).
+      // ! 如果 props 或是 context 發生變化，將 fiber 標記為需要更新
       didReceiveUpdate = true;
     } else {
       // Neither props nor legacy context changes. Check if there's a pending
       // update or context change.
+      // ! props 和 legacy context 都沒有變化，檢查是否有掛起的更新或是 context 變更，fiber 的 lanes 是否存在在 subtreeRenderLanes 中
       const hasScheduledUpdateOrContext = checkScheduledUpdateOrContext(
         current,
         renderLanes
@@ -3904,6 +3920,7 @@ function beginWork(current, workInProgress, renderLanes) {
         (workInProgress.flags & DidCapture) === NoFlags
       ) {
         // No pending updates or context. Bail out now.
+        // ! 直接返回，復用之前的節點
         didReceiveUpdate = false;
         return attemptEarlyBailoutIfNoScheduledUpdate(
           current,
@@ -3912,6 +3929,7 @@ function beginWork(current, workInProgress, renderLanes) {
         );
       }
       if ((current.flags & ForceUpdateForLegacySuspense) !== NoFlags) {
+        // ! 傳統模式下，當前節點是否要強制更新
         // This is a special case that only exists for legacy mode.
         // See https://github.com/facebook/react/pull/19216.
         didReceiveUpdate = true;
@@ -3953,6 +3971,18 @@ function beginWork(current, workInProgress, renderLanes) {
   workInProgress.lanes = NoLanes;
 
   switch (workInProgress.tag) {
+    // ! FunctionComponent 在第一次辨識時會被認為是 IndeterminateComponent，有一些特殊的函式組件寫法趨近於 class 組件，需要特殊處理
+    // ! 比方，函式組件回傳的物件包含 render 方法
+    // ! https://blog.csdn.net/weixin_46463785/article/details/129820980
+    /**
+     * function App() {
+        return {
+          render() {
+            return <p>function render</p>;
+          },
+        };
+      }
+     */
     case IndeterminateComponent: {
       return mountIndeterminateComponent(
         current,

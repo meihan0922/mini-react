@@ -580,6 +580,7 @@ export function requestUpdateLane(fiber) {
   if ((mode & ConcurrentMode) === NoMode) {
     return SyncLane;
   } else if (
+    // ! 併發模式，判斷當前是否有任務在執行，
     (executionContext & RenderContext) !== NoContext &&
     workInProgressRootRenderLanes !== NoLanes
   ) {
@@ -592,9 +593,11 @@ export function requestUpdateLane(fiber) {
     // This behavior is only a fallback. The flag only exists until we can roll
     // out the setState warning, since existing code might accidentally rely on
     // the current behavior.
+
+    // ! 回傳 任務優先級
     return pickArbitraryLane(workInProgressRootRenderLanes);
   }
-  // 過度更新
+  // ! 過度更新，如果是低優先級的，返回申請的低優先級
   const isTransition = requestCurrentTransition() !== NoTransition;
   if (isTransition) {
     if (__DEV__ && ReactCurrentBatchConfig.transition !== null) {
@@ -622,8 +625,7 @@ export function requestUpdateLane(fiber) {
   // The opaque type returned by the host config is internally a lane, so we can
   // use that directly.
   // TODO: Move this type conversion to the event priority module.
-  // * 內部的更新，比如說 flushSync,setState，會通過上下文變數來跟蹤其優先值
-  // 會回傳變量
+  // ! 內部的更新，比如說 flushSync,setState，會通過上下文變數來跟蹤其優先值
   // TODO: 之後再回來看 走這段的更新
   const updateLane = getCurrentUpdatePriority();
   if (updateLane !== NoLane) {
@@ -636,7 +638,7 @@ export function requestUpdateLane(fiber) {
   // The opaque type returned by the host config is internally a lane, so we can
   // use that directly.
   // TODO: Move this type conversion to the event priority module.
-  // * 外部的更新（從外部發起），根據事件類型，向當前環境獲取對應的優先級
+  // ! 外部的更新（從外部發起 ex: setTimeout），根據事件類型，向當前環境獲取對應的優先級
   // ex: createRoot 也算
   // 初次渲染 回傳默認的優先級，defaultLane: 32
   // react-debugger/src/react/packages/react-dom-bindings/src/client/ReactFiberConfigDOM.js
@@ -671,8 +673,9 @@ export function scheduleUpdateOnFiber(root, fiber, lane) {
     "color: #fff; background: #b9f; font-size: 13px;",
     ""
   );
-  // ! 自底向上更新整個優先權並會傳回更新後的整個Fiber 樹的根節點
-  // ! 標記Root 的更新
+  // 檢查是否有循環更新
+  checkForNestedUpdates();
+
   if (__DEV__) {
     if (isRunningInsertionEffect) {
       console.error("useInsertionEffect must not schedule updates.");
@@ -783,7 +786,7 @@ export function scheduleUpdateOnFiber(root, fiber, lane) {
       }
     }
 
-    // ! 確保調度開始了
+    // ! 註冊微任務去啟動 scheduler 調度任務，去“處理 fiber 構造”的任務
     ensureRootIsScheduled(root);
 
     if (
@@ -889,7 +892,7 @@ export function performConcurrentWorkOnRoot(root, didTimeout) {
 
   let exitStatus = shouldTimeSlice
     ? renderRootConcurrent(root, lanes) // ! 後續參考 useDeferredValuePage 例子
-    : renderRootSync(root, lanes); // ! 不使用時間切片
+    : renderRootSync(root, lanes); // ! 不使用時間切片，初始化走這裡
   if (exitStatus !== RootInProgress) {
     if (exitStatus === RootErrored) {
       // If something threw an error, try rendering one more time. We'll
@@ -973,6 +976,7 @@ export function performConcurrentWorkOnRoot(root, didTimeout) {
 
       // We now have a consistent tree. The next step is either to commit it,
       // or, if something suspended, wait to commit it after a timeout.
+      // ! 不管同步或非同步都會拿到 WorkInProgress 的根節點，放到 fiberRootNode.finishedWork 上
       root.finishedWork = finishedWork;
       root.finishedLanes = lanes;
       finishConcurrentRender(root, exitStatus, finishedWork, lanes);
@@ -1268,6 +1272,7 @@ function markRootSuspended(root, suspendedLanes) {
 
 // This is the entry point for synchronous tasks that don't go
 // through Scheduler
+// ! 不會經過調度器的同步任務們
 export function performSyncWorkOnRoot(root) {
   if (enableProfilerTimer && enableProfilerNestedUpdatePhase) {
     syncNestedUpdateFlag();
@@ -1328,6 +1333,7 @@ export function performSyncWorkOnRoot(root) {
   // We now have a consistent tree. Because this is a sync render, we
   // will commit it even if something suspended.
   const finishedWork = root.current.alternate;
+  // ! 不管同步或非同步都會拿到 WorkInProgress 的根節點，放到 fiberRootNode.finishedWork 上
   root.finishedWork = finishedWork;
   root.finishedLanes = lanes;
   commitRoot(
@@ -2659,8 +2665,8 @@ function commitRootImpl(
     // no more pending effects.
     // TODO: Might be better if `flushPassiveEffects` did not automatically
     // flush synchronous work at the end, to avoid factoring hazards like this.
-    // ! 處理 useEffect, useLayoutEffect
-    // ! 但不是在這裡執行，因為是異步的
+    // ! 處理 useEffect, useLayoutEffect cleanup ， setup
+    // ! 但 setup 不是在這裡執行，因為是異步的
     flushPassiveEffects();
   } while (rootWithPendingPassiveEffects !== null);
   flushRenderPhaseStrictModeWarningsInDEV();
@@ -2704,6 +2710,7 @@ function commitRootImpl(
       }
     }
   }
+
   root.finishedWork = null;
   root.finishedLanes = NoLanes;
 
@@ -2722,13 +2729,14 @@ function commitRootImpl(
 
   // Check which lanes no longer have any work scheduled on them, and mark
   // those as finished.
+  // ! 剩下還需要更新的優先級
   let remainingLanes = mergeLanes(finishedWork.lanes, finishedWork.childLanes);
 
   // Make sure to account for lanes that were updated by a concurrent event
   // during the render phase; don't mark them as finished.
   const concurrentlyUpdatedLanes = getConcurrentlyUpdatedLanes();
   remainingLanes = mergeLanes(remainingLanes, concurrentlyUpdatedLanes);
-
+  // ! 清理掉已經更新的優先級
   markRootFinished(root, remainingLanes);
 
   if (root === workInProgressRoot) {
@@ -2794,7 +2802,7 @@ function commitRootImpl(
     setCurrentUpdatePriority(DiscreteEventPriority);
 
     const prevExecutionContext = executionContext;
-    //! 2. commit 階段
+    //! 標記 commit 階段
     executionContext |= CommitContext;
 
     // Reset this to null before calling lifecycles
@@ -2807,8 +2815,9 @@ function commitRootImpl(
     // The first phase a "before mutation" phase. We use this phase to read the
     // state of the host tree right before we mutate it. This is where
     // getSnapshotBeforeUpdate is called.
-    // ! before mutation( dom 操作之前)
+    // ! 2. before mutation( dom 操作之前)
     // ! 觸發生命週期 getSnapShotBeforeUpdate
+    // ! 處理DOM節點渲染/刪除後的focus和blur邏輯。之後深度遍歷直到沒有孩子為止
     const shouldFireAfterActiveInstanceBlur = commitBeforeMutationEffects(
       root,
       finishedWork
@@ -2841,6 +2850,7 @@ function commitRootImpl(
     // the mutation phase, so that the previous tree is still current during
     // componentWillUnmount, but before the layout phase, so that the finished
     // work is current during componentDidMount/Update.
+    // ! 4. 新的樹生成完畢，取代成為 current 樹
     root.current = finishedWork;
 
     // The next phase is the layout phase, where we call effects that read
@@ -2881,6 +2891,7 @@ function commitRootImpl(
     setCurrentUpdatePriority(previousPriority);
     ReactCurrentBatchConfig.transition = prevTransition;
   } else {
+    // ! 沒有任何副作用的情況
     // No effects.
     root.current = finishedWork;
     // Measure these anyway so the flamegraph explicitly shows that there were
@@ -2892,7 +2903,7 @@ function commitRootImpl(
   }
 
   const rootDidHavePassiveEffects = rootDoesHavePassiveEffects;
-
+  // ! 處理 useEffect 相關內容
   if (rootDoesHavePassiveEffects) {
     // This commit has passive effects. Stash a reference to them. But don't
     // schedule a callback until after flushing layout work.
@@ -2948,6 +2959,7 @@ function commitRootImpl(
 
   // Always call this before exiting `commitRoot`, to ensure that any
   // additional work on this root is scheduled.
+  // ! 觸發一次新的調度，確保任何新的附加上去的任務被調度
   ensureRootIsScheduled(root);
 
   if (recoverableErrors !== null) {
@@ -3003,6 +3015,7 @@ function commitRootImpl(
   }
 
   // If layout work was scheduled, flush it now.
+  // ! 執行所有同步任務
   flushSyncWorkOnAllRoots();
 
   if (__DEV__) {
@@ -3515,6 +3528,34 @@ export function throwIfInfiniteUpdateLoopDetected() {
     nestedPassiveUpdateCount = 0;
     rootWithNestedUpdates = null;
     rootWithPassiveNestedUpdates = null;
+
+    throw new Error(
+      "Maximum update depth exceeded. This can happen when a component " +
+        "repeatedly calls setState inside componentWillUpdate or " +
+        "componentDidUpdate. React limits the number of nested updates to " +
+        "prevent infinite loops."
+    );
+  }
+
+  if (__DEV__) {
+    if (nestedPassiveUpdateCount > NESTED_PASSIVE_UPDATE_LIMIT) {
+      nestedPassiveUpdateCount = 0;
+      rootWithPassiveNestedUpdates = null;
+
+      console.error(
+        "Maximum update depth exceeded. This can happen when a component " +
+          "calls setState inside useEffect, but useEffect either doesn't " +
+          "have a dependency array, or one of the dependencies changes on " +
+          "every render."
+      );
+    }
+  }
+}
+
+function checkForNestedUpdates() {
+  if (nestedUpdateCount > NESTED_UPDATE_LIMIT) {
+    nestedUpdateCount = 0;
+    rootWithNestedUpdates = null;
 
     throw new Error(
       "Maximum update depth exceeded. This can happen when a component " +

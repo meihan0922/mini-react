@@ -143,6 +143,7 @@ function finalizeInitialChildren(
 // 要把整個子節點添加到 workInProgress.stateNode 上
 // 源碼中，這裡也會處理 isHidden
 function appendAllChildren(parent: Element, workInProgress: Fiber) {
+  // debugger;
   let node = workInProgress.child;
   while (node !== null) {
     if (isHost(node)) {

@@ -229,7 +229,7 @@ export function createContainer(
     ""
   );
   const hydrate = false;
-  const initialChildren = null;
+  const initialChildren = null; // 初始子節點
   return createFiberRoot(
     containerInfo,
     tag,
@@ -309,6 +309,7 @@ export function updateContainer(element, container, parentComponent, callback) {
   if (__DEV__) {
     onScheduleRoot(container, element);
   }
+  // ! 獲取當前的老樹，在 FiberRootNode 上
   // ! FiberRootNode.current -> HostRootFiber
   const current = container.current;
 
@@ -318,7 +319,7 @@ export function updateContainer(element, container, parentComponent, callback) {
    * 每個 update 都會被分配一個或多個 lane，
    * 以確定其在更新隊列中的優先順序。
    *
-   * 頁面初次渲染，defaultLane 32
+   * ! 頁面初次渲染，defaultLane 32
    */
   const lane = requestUpdateLane(current);
 
@@ -390,14 +391,14 @@ export function updateContainer(element, container, parentComponent, callback) {
     update.callback = callback;
   }
   /**
+   * ! 把創建的更新，加到到更新鏈表當中
    * ! 沒有立刻把 update 放到 fiber 上面，先放到 concurrentQueues，
-   * 如果渲染正在進行中，並且收到來自併發事件的更新，
-   * 就會等到當前的渲染結束，（不論是完成或是被中斷），
+   * ! 如果渲染正在進行中，並且收到來自併發事件的更新，
+   * ! 就會等到當前的渲染結束，（不論是完成或是被中斷），
    *
    * 如果 setState 2次 -> 2個update，
    * 重複2次(createUpdate -> enqueueUpdate -> scheduleUpdateOnFiber)
    * 將update推送到這個陣列中，這樣以後就可以訪問 queue, fiber, update 等等
-   *
    *
    * 再在 render 後、workLoopSync 前
    * finishQueueingConcurrentUpdates 一次處理，將其添加到 queue.shared.pending; 隊列當中
@@ -410,6 +411,7 @@ export function updateContainer(element, container, parentComponent, callback) {
    */
   const root = enqueueUpdate(current, update, lane);
   if (root !== null) {
+    // ! 根據優先級 創建更新任務
     scheduleUpdateOnFiber(root, current, lane);
     entangleTransitions(root, current, lane);
   }

@@ -62,6 +62,8 @@ export function performConcurrentWorkOnRoot(root: FiberRoot) {
   const finishedWork = root.current.alternate;
 
   root.finishedWork = finishedWork;
+  debugger;
+  // console.log("finishedWork", finishedWork);
   // ! 2. commit: VDOM -> DOM
   commitRoot(root);
 }

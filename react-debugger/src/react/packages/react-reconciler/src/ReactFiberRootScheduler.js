@@ -80,7 +80,7 @@ let isFlushingWork = false;
 let currentEventTransitionLane = NoLane;
 
 // ! 註冊調度任務，Scheduler調度，構造 fiber
-// ! 是否需要註冊新的調度，然後註冊一個新的調度來執行我們的Fiber生成邏輯
+// ! 是否需要註冊新的調度？然後註冊一個新的調度來執行我們的Fiber生成邏輯
 export function ensureRootIsScheduled(root) {
   console.log(
     "%c [ ensureRootIsScheduled ]: ",
@@ -115,9 +115,7 @@ export function ensureRootIsScheduled(root) {
   // 每當 root 接收到 update，將其設成 true，直到下次調度為止。
   // 如果為 false 就可以在不查看調度的情況下，快速退出 flushSync
   mightHavePendingSyncWork = true;
-  // console.log(
-  //   "產生兩類調度任務, 一個是SyncWork，另一個是ConcurrentWork，他們分別對應同步任務和可中斷任務"
-  // );
+
   // At the end of the current event, go through each of the roots and ensure
   // there's a task scheduled for each one at the correct priority.
   // 在當前事件結束時，逐個檢查每個 root ，確保每個 root 安排了正確的優先級任務
@@ -275,6 +273,7 @@ function processRootScheduleInMicrotask() {
       markRootEntangled(root, mergeLanes(currentEventTransitionLane, SyncLane));
     }
     // ! 核心邏輯
+    // ! 拿到回傳的任務優先級，表示準備要執行的優先級
     const nextLanes = scheduleTaskForRootDuringMicrotask(root, currentTime);
     if (nextLanes === NoLane) {
       // This root has no more pending work. Remove it from the schedule. To
@@ -309,6 +308,7 @@ function processRootScheduleInMicrotask() {
 
   // At the end of the microtask, flush any pending synchronous work. This has
   // to come at the end, because it does actual rendering work that might throw.
+  // ! 在微任務結束時，掛起的同步任務。這必須在最後進行，因為它執行可能會拋出異常的渲染工作。
   flushSyncWorkOnAllRoots();
 }
 
@@ -348,19 +348,20 @@ function scheduleTaskForRootDuringMicrotask(root, currentTime) {
 
   const existingCallbackNode = root.callbackNode;
   if (
+    // ! 檢查是否沒有什麼可做的
     // Check if there's nothing to work on
     nextLanes === NoLanes ||
     // If this root is currently suspended and waiting for data to resolve, don't
     // schedule a task to render it. We'll either wait for a ping, or wait to
     // receive an update.
-    //
+    // ! 如果根目前已掛起並等待資料解析，則不要再安排一個新任務來處理它
     // Suspended render phase
     (root === workInProgressRoot && isWorkLoopSuspendedOnData()) ||
     // Suspended commit phase
     root.cancelPendingCommit !== null
   ) {
     // Fast path: There's nothing to work on.
-    // ! 新任務的優先級>現有的任務優先級，取消現有的任務執行
+    // !
     if (existingCallbackNode !== null) {
       cancelCallback(existingCallbackNode);
     }
@@ -370,7 +371,7 @@ function scheduleTaskForRootDuringMicrotask(root, currentTime) {
   }
 
   // Schedule a new callback in the host environment.
-  // ! 判斷新任務的優先級是否是同步的
+  // ! 判斷新任務的優先級是否是同步的，因為同步的任務一定會在微任務結束時刷新，所以不用再安排任務了
   if (includesSyncLane(nextLanes)) {
     // Synchronous work is always flushed at the end of the microtask, so we
     // don't need to schedule an additional task.
