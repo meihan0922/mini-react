@@ -580,7 +580,6 @@ export function requestUpdateLane(fiber) {
   if ((mode & ConcurrentMode) === NoMode) {
     return SyncLane;
   } else if (
-    // ! 併發模式，判斷當前是否有任務在執行，
     (executionContext & RenderContext) !== NoContext &&
     workInProgressRootRenderLanes !== NoLanes
   ) {
@@ -593,8 +592,6 @@ export function requestUpdateLane(fiber) {
     // This behavior is only a fallback. The flag only exists until we can roll
     // out the setState warning, since existing code might accidentally rely on
     // the current behavior.
-
-    // ! 回傳 任務優先級
     return pickArbitraryLane(workInProgressRootRenderLanes);
   }
   // ! 過度更新，如果是低優先級的，返回申請的低優先級
@@ -625,8 +622,7 @@ export function requestUpdateLane(fiber) {
   // The opaque type returned by the host config is internally a lane, so we can
   // use that directly.
   // TODO: Move this type conversion to the event priority module.
-  // ! 內部的更新，比如說 flushSync,setState，會通過上下文變數來跟蹤其優先值
-  // TODO: 之後再回來看 走這段的更新
+  // ! 內部的更新，比如說 flushSync, setState，會通過上下文變數來跟蹤其優先值
   const updateLane = getCurrentUpdatePriority();
   if (updateLane !== NoLane) {
     return updateLane;

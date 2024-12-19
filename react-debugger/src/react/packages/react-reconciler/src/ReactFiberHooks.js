@@ -1123,7 +1123,7 @@ function updateReducerImpl(hook, current, reducer) {
       "Should have a queue. This is likely a bug in React. Please file an issue."
     );
   }
-
+  // 更新 queue 中的 reducer，用於後續操作
   queue.lastRenderedReducer = reducer;
 
   // The last rebase update that is NOT part of the base state.
@@ -1134,15 +1134,19 @@ function updateReducerImpl(hook, current, reducer) {
   // ! 拿 queue 隊列
   const pendingQueue = queue.pending;
   // ! 拼接隊列，把 pendingQueue 轉移到 baseQueue
+  // ! ex:
+  // ! baseQueue: A -> B -> C (-> A) (環形的，C next-> A)
+  // ! pendingQueue: D -> E (-> D) (環形的，E next-> D)
+  // ! 合併後 A -> D -> E -> B -> C (-> A)
   if (pendingQueue !== null) {
     // We have new updates that haven't been processed yet.
     // We'll add them to the base queue.
     if (baseQueue !== null) {
       // Merge the pending queue and the base queue.
-      const baseFirst = baseQueue.next;
-      const pendingFirst = pendingQueue.next;
-      baseQueue.next = pendingFirst;
-      pendingQueue.next = baseFirst;
+      const baseFirst = baseQueue.next; // ! A
+      const pendingFirst = pendingQueue.next; // ! D
+      baseQueue.next = pendingFirst; // ! C -> D
+      pendingQueue.next = baseFirst; // ! E -> A
     }
     if (__DEV__) {
       if (current.baseQueue !== baseQueue) {
@@ -1154,13 +1158,17 @@ function updateReducerImpl(hook, current, reducer) {
         );
       }
     }
+
+    // ! baseQueue: A -> B -> C -> D -> E (-> A)
+    // ! pendingQueue: D -> E -> A -> B -> C (-> D)
+    // ! 全部被更新成： D -> E -> A -> B -> C (-> D)
     current.baseQueue = baseQueue = pendingQueue;
     queue.pending = null;
   }
 
   if (baseQueue !== null) {
     // We have a queue to process.
-    const first = baseQueue.next;
+    const first = baseQueue.next; // ! D
     // ! 因為是可能被中斷的，所以要記下上次執行到一半的結果，可能不等於當前渲染的結果
     // ! 確保在高優先級打斷當前渲染時，可以回退到一個穩定的狀態
     // ! memoizedState 是最後一次渲染計算的狀態結果
@@ -1210,9 +1218,10 @@ function updateReducerImpl(hook, current, reducer) {
           eagerState: update.eagerState,
           next: null,
         };
+        // ! 首次發現低優先級
         if (newBaseQueueLast === null) {
           newBaseQueueFirst = newBaseQueueLast = clone;
-          newBaseState = newState;
+          newBaseState = newState; // 紀錄跳過此更新時的狀態
         } else {
           newBaseQueueLast = newBaseQueueLast.next = clone;
         }
@@ -1236,14 +1245,14 @@ function updateReducerImpl(hook, current, reducer) {
           // This is not an optimistic update, and we're going to apply it now.
           // But, if there were earlier updates that were skipped, we need to
           // leave this update in the queue so it can be rebased later.
-          // ! 之前的節點有不能執行的，那後面的節點都要緩存
+          // ! 之前的節點有不能執行的，但我們需要保存這個更新在佇列中，之後可以重新調整基礎
           if (newBaseQueueLast !== null) {
             const clone = {
               // This update is going to be committed so we never want uncommit
               // it. Using NoLane works because 0 is a subset of all bitmasks, so
               // this will never be skipped by the check above.
-              // ! 該update需要被執行，使用NoLane，避免跳過
-              lane: NoLane,
+              // ! 該 update 需要被執行 要進入 commit 階段，使用 NoLane，避免跳過
+              lane: NoLane, // ! 標記為無需再次處理
               revertLane: NoLane,
               action: update.action,
               hasEagerState: update.hasEagerState,
@@ -1302,7 +1311,9 @@ function updateReducerImpl(hook, current, reducer) {
         if (shouldDoubleInvokeUserFnsInHooksDEV) {
           reducer(newState, action);
         }
-        // ! hasEagerState : 直接呼叫queue.lastRenderedReducer,計算出update之後的state, 記為eagerState
+
+        // ! hasEagerState : 是否已經提前計算好更新狀態了，可以直接拿取結果，不用再調用 reducer
+        // ! 在 dispatchAction 或 dispatchReducerAction 階段，如果當前狀態和更新的動作可以直接應用，React 會嘗試提前計算新狀態，並將其存儲在 eagerState 中。
         if (update.hasEagerState) {
           // If this update is a state update (not a reducer) and was processed eagerly,
           // we can use the eagerly computed state
@@ -2570,12 +2581,13 @@ function dispatchReducerAction(fiber, queue, action) {
   };
 
   if (isRenderPhaseUpdate(fiber)) {
+    // ! 表示這是一個「渲染階段更新」，例如在函式組件的渲染過程中直接調用 setState 或 dispatch，這樣的更新會被緩存在渲染過程中，並在當前的渲染結束後再處理。
     enqueueRenderPhaseUpdate(queue, update);
   } else {
     // ! 把 update 暫存到 concurrentQueue array 中，
     const root = enqueueConcurrentHookUpdate(fiber, queue, update, lane);
     if (root !== null) {
-      // ! 調度更新，之後 finishQueueingConcurrentUpdates，會把 concurrentQueues 的內容添加到 fiber 的 queue 上
+      // ! 調度更新，之後 finishQueueingConcurrentUpdates，會把 concurrentQueues 的內容添加到 fiber.memorizedState 的 hook 的 queue.pending 上
       scheduleUpdateOnFiber(root, fiber, lane);
       entangleTransitionUpdate(root, queue, lane);
     }

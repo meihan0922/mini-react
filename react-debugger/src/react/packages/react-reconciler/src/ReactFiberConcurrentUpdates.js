@@ -82,9 +82,15 @@ export function finishQueueingConcurrentUpdates() {
     concurrentQueues[i++] = null;
 
     /**
-     * 這裡建構完成之後的 fiber.updateQueue.shared.pending 數據類型是 update
-     * 但是 fiber.updateQueue.shared.pending 儲存的是單向循環鏈表
-     * 所以他其實指向的是最後一個update，他的next指向第一個update
+     * !!!!!! 注意
+     * hook setState 和 類組件的更新都會走到此，但是！
+     * queue 指的位置不同，
+     * hook: fiber.memoizedState 存放 第一個 hook，而每個 hook 身上都有自己的 queue
+     * 而此指的就是 把 update 放入 hook.queue.pending
+     *
+     * class: 放入的是 fiber.updateQueue.shared.pending
+     *
+     * 儲存的都是單向循環鏈表，他指向的是最後一個update，他的next指向第一個update
      */
     if (queue !== null && update !== null) {
       const pending = queue.pending; // 單向循環
