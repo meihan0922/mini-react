@@ -683,11 +683,44 @@ fiber 上會透過 childLanes 儲存子節點優先級，可以透過 childLanes
 如果不是過度優先級，且是處於空閑狀態下，根據綁定的事件優先順序進行，如果是外部的事件觸發，比方說 `setTimeout`，獲取其設定的優先級。
 在 `fiberRoot.pendingLanes` 上加上 lane。
 
+流程圖:
+
+```rust
+用戶事件 (onClick)
+   |
+修改 executionContext (DiscreteEventContext)
+   |
+執行回調 -> 呼叫 setState
+   |
+計算優先級 -> 拿到當前上下文中對應的優先級(getCurrentUpdatePriority)，創建 update
+   |
+加入更新隊列 (hook.queue.pending 或 fiber.updateQueue.shared.pending)
+   |
+調度更新 (scheduleUpdateOnFiber)
+   |
+進入 render 階段 -> 應用更新
+   |
+完成 commit 階段 -> 更新 DOM
+```
+
 之後開始調度更新，每次都要先判斷 `pendingLanes` 中有沒有要過期的，改放到 `expiredLanes` 中。之後拿到最高優先級任務，根據當前的任務能不能打斷，根據優先級判斷執行模式，把計算得到的最高優先級 Lanes 放入 `subtreeRenderLanes`，作為這次調度執行的任務。
 
 執行 diff ，根據 fiber lanes 與 `subtreeRenderLanes` 比對判斷是否可以直接復用，如果不行，就呼叫 `processUpdateQueue` 處理 fiber 上的更新隊列，並刪除對應的 lane。
 
 進入 commit 階段，將每個節點和子節點的 lanes 合併，計算出還沒有更新的 lanes，記錄下來。
+
+```ts
+// 除了0:沒有優先級以外，數字越小等級越高
+export type PriorityLevel = 0 | 1 | 2 | 3 | 4 | 5;
+
+export const NoPriority = 0;
+export const ImmediatePriority = 1;
+export const UserBlockingPriority = 2;
+export const NormalPriority = 3;
+export const LowPriority = 4;
+export const IdlePriority = 5;
+```
+
 ## 重點整理
 
 1. jsx -> react element -> fiber tree -> dom tree

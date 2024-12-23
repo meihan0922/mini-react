@@ -2498,6 +2498,9 @@ export function completeWork(
 
 ### 模擬 useReducer
 
+![state 流程圖](./assets/state%20流程圖.png)
+![hookstate](./assets/hooksState.png)
+
 ```tsx
 function Comp() {
   // const [count, setC] = useReducer((x) => {
@@ -3690,6 +3693,8 @@ export function useState<S>(initialState: (() => S) | S) {
 
 ### 模擬 useMemo
 
+![useMemo useCallback 流程圖](./assets/useMemo:useCallback%20流程圖.png)
+
 每次重新渲染能夠緩存計算的結果。
 
 ```ts
@@ -3785,6 +3790,8 @@ export function areHookInputEqual(nextDeps: Array<any>, prevDeps: Array<any>) {
 ```
 
 ### 模擬 useCallback
+
+![useMemo useCallback 流程圖](./assets/useMemo:useCallback%20流程圖.png)
 
 如果函式以`props`往子組件傳遞，子組件已經包裹過`memo`，但父組件每次更新時，函式都是新的。
 
@@ -3895,6 +3902,8 @@ export function useCallback<T extends Function>(
 
 ### 模擬 useRef
 
+![ref 流程圖](./assets/ref%20流程圖.png)
+
 ```tsx
 function Comp() {
   const addClick = () => {
@@ -3958,6 +3967,8 @@ const useInterval = (
 ```
 
 ### 模擬 useLayoutEffect, useEffect
+
+![effect 流程圖](./assets/effect%20流程圖.png)
 
 - useLayoutEffect
 

@@ -2487,12 +2487,13 @@ function commitMutationEffectsOnFiber(finishedWork, root, lanes) {
 
       if (flags & Update) {
         try {
-          // !
+          // ! 取得 fiber.updateQueue，如果tag參數和傳入的一樣，執行 destroy
           commitHookEffectListUnmount(
             HookInsertion | HookHasEffect,
             finishedWork,
             finishedWork.return
           );
+          // ! 掛載新的 destroy
           commitHookEffectListMount(
             HookInsertion | HookHasEffect,
             finishedWork
@@ -4142,12 +4143,13 @@ function commitHookPassiveUnmountEffects(
     );
   }
 }
-
+// ! 遞歸處理 deletions，副作用的卸載
 function recursivelyTraversePassiveUnmountEffects(parentFiber) {
   // Deletions effects can be scheduled on any fiber type. They need to happen
   // before the children effects have fired.
   const deletions = parentFiber.deletions;
 
+  // ! 對應有子節點被刪除的情況
   if ((parentFiber.flags & ChildDeletion) !== NoFlags) {
     if (deletions !== null) {
       for (let i = 0; i < deletions.length; i++) {
@@ -4169,6 +4171,7 @@ function recursivelyTraversePassiveUnmountEffects(parentFiber) {
     let child = parentFiber.child;
     while (child !== null) {
       setCurrentDebugFiberInDEV(child);
+      // ! 核心邏輯
       commitPassiveUnmountOnFiber(child);
       child = child.sibling;
     }
@@ -4183,6 +4186,7 @@ function commitPassiveUnmountOnFiber(finishedWork) {
     case SimpleMemoComponent: {
       recursivelyTraversePassiveUnmountEffects(finishedWork);
       if (finishedWork.flags & Passive) {
+        // ! 執行副作用 destroy
         commitHookPassiveUnmountEffects(
           finishedWork,
           finishedWork.return,

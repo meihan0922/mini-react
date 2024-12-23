@@ -394,6 +394,8 @@ useCallback(fn, dependencies);
 
 他的源碼很簡潔，在初始時，記憶參數到 `memoizedState` 上，更新時，比較依賴項，回傳快取的函式，不然把新的替換上 `memoizedState`
 
+![useMemo useCallback 流程圖](./assets/useMemo:useCallback%20流程圖.png)
+
 ```ts
 function mountCallback(callback, deps) {
   const hook = mountWorkInProgressHook();
@@ -567,6 +569,8 @@ ref 是可以操作 DOM 的，所以要怎麼綁定？在哪裡綁？
 
 - `commitMutationEffectsOnFiber`: 會進行遞歸處理刪除，並且呼叫 `safelyDetachRef`，判定 ref 是否是函式，如果是：則是類組件 `createRef` 創造的，則呼叫他 `ref(null)`，把內部直設定成空; 如果不是：就把 `useRef` 值設定成 null。
 - `commitLayoutEffect`: 會操作真實 DOM，如果 `flags` 有標記，則處理綁定 DOM(原生節點的話) 或是 `fiber.stateNode` 或是實例。
+
+![ref 流程圖](./assets/ref%20流程圖.png)
 
 ### 總結
 
@@ -832,11 +836,6 @@ function dispatchSetState(fiber, queue, action) {
       const lastRenderedReducer = queue.lastRenderedReducer;
       if (lastRenderedReducer !== null) {
         let prevDispatcher;
-        if (__DEV__) {
-          prevDispatcher = ReactCurrentDispatcher.current;
-          ReactCurrentDispatcher.current =
-            InvalidNestedHooksDispatcherOnUpdateInDEV;
-        }
         try {
           const currentState = queue.lastRenderedState;
           const eagerState = lastRenderedReducer(currentState, action);
@@ -883,34 +882,71 @@ function dispatchSetState(fiber, queue, action) {
 流程圖
 
 ```rust
-dispatchReducerAction
+用戶事件 (例如 onClick)
    |
-enqueueUpdate (update 入隊)
+**修改 executionContext** (設置成 `DiscreteEventContext`，標記當前正在處理離散事件)
    |
-scheduleUpdateOnFiber
+執行回調 -> 呼叫 `useReducer` 的狀態更新函數 -> 觸發 `dispatchReducerAction`
    |
-finishQueueingConcurrentUpdates（把更新掛載到 fiber 的 hooks 儲存處的 queue.pending 上）
-   | render 階段
-beginWork
+**計算優先級**：通過 `getCurrentUpdatePriority` 獲取當前上下文的優先級。
    |
-updateFunctionComponent
+**創建 update**：使用當前狀態和新的 `action` 創建一個 `update` 對象，並調用 `enqueueUpdate`，將其入隊到內存中的隊列中。
    |
-renderWithHooks（再次執行函式組件）
+**`scheduleUpdateOnFiber`**：通知 React 有新的更新需要處理。
    |
-useReducer（再次執行函式組件內的 useReducer，指向 updateReducer，執行完成後返回新的 state 和 dispatch）
+**`finishQueueingConcurrentUpdates`**：將 `update` 從臨時內存隊列轉移到 `fiber` 的 `queue.pending`，並掛載到對應的 `fiber` 上。
    |
-updateWorkInProgressHook 看是否復用 hook 拼接到 workInProgressHook 上，改變指針，讓下個 hook 有指向
+**render 階段開始**：
    |
-updateReducerImpl(處理 pending 隊列和之前遺留的隊列合併，優先處理 pending 新增的，因為是用戶最新的交互，優先級可能會更高。遍歷 hook 上待更新隊列，按照優先級判定執行與否。計算出最新的 state，（執行待更新隊列時，如果此更新是存函式(ex:`setCount((count) => count + 1);`) ，所傳入的參數是 最新的狀態值，如果是一般值的更新，就是取同一個值本身)，作為新的 回傳值，看是否要更新，處理標籤。如果不符合優先級，則將此更新以後的其他更新，保留鏈表儲存起來，並將處理到一半的狀態也保留。
+**`beginWork`**：遞歸處理每個 `fiber` 節點，更新虛擬 DOM 樹。
    |
-finishQueueingConcurrentUpdates (上個更新可能又產生新的 update)
+**`updateFunctionComponent`**：執行函數組件的更新邏輯。
    |
-完成 commit 階段 -> 更新 DOM
+**`renderWithHooks`**：
+   - 再次執行函數組件，進行 `hooks` 的更新計算。
+   - 這會調用 `useReducer`，該函數內部調用 `updateReducer`，進一步執行狀態計算。
+   |
+**`updateWorkInProgressHook`**：
+   - 判斷是否可以復用之前的 `hook`。
+   - 拼接到 `workInProgressHook` 的鏈表上，改變指針以讓下個 `hook` 正確連接。
+   |
+**`updateReducerImpl`**：
+   - 合併 `pending` 隊列和之前的 `baseQueue`。
+   - **優先處理 `pending` 隊列**（因為這是用戶最新的交互，可能優先級較高）。
+   - 遍歷所有更新，判斷是否執行（根據優先級判定）。
+   - 計算新的 `state`：
+     - 如果更新是函數類型（例如 `setCount((count) => count + 1)`），使用最新的 `state` 作為參數。
+     - 如果是一般值更新，直接使用該值。
+   - 如果有部分更新優先級不夠，保留鏈表，並將處理到一半的狀態記錄到 `baseState`。
+   |
+**再次調用 `finishQueueingConcurrentUpdates`**：如果本次更新生成了新的更新，將其入隊。
+   |
+**完成 render 階段**：
+   - 準備進入 `commit` 階段，標記需要執行的 DOM 操作和副作用（`flags`）。
+   |
+**commit 階段**：
+   |
+- **Mutation 階段**：
+   - 執行 `useLayoutEffect` 的 `destroy` 回調（舊的清理邏輯）。
+   - 應用 DOM 的變更（將虛擬 DOM 應用到真實 DOM 中）。
+   |
+- **Layout 階段**：
+   - 執行新的 `useLayoutEffect` 的 `create` 回調（掛載新的副作用）。
+   |
+- **完成後的被動副作用（`useEffect`）處理**：
+   - 如果有 `useEffect` 副作用，將其放入異步調度。
+   |
+**最終完成更新並同步 DOM**
+
 ```
 
 > react-debugger/src/react/packages/react-reconciler/src/ReactFiberHooks.js
 
 ```ts
+function updateState(initialState) {
+  return updateReducer(basicStateReducer, initialState);
+}
+
 function updateReducer(reducer, initialArg, init) {
   const hook = updateWorkInProgressHook();
   return updateReducerImpl(hook, currentHook, reducer);
@@ -938,7 +974,6 @@ function updateReducerImpl(hook, current, reducer) {
   // ! ex:
   // ! baseQueue: A -> B -> C (-> A) (環形的，C next-> A)
   // ! pendingQueue: D -> E (-> D) (環形的，E next-> D)
-  // ! 合併後 A -> D -> E -> B -> C (-> A)
   if (pendingQueue !== null) {
     // We have new updates that haven't been processed yet.
     // We'll add them to the base queue.
@@ -960,8 +995,8 @@ function updateReducerImpl(hook, current, reducer) {
   // pendingQueue ! == null
   if (baseQueue !== null) {
     // We have a queue to process.
-    // ! pendingFirst，優先處理 pending
-    // ! 因為是可能被中斷的，所以要記下上次執行到一半的結果，可能不等於當前渲染的結果
+    // ! pendingFirst，優先處理 pending，因為是用戶最新的交互，優先級可能會較高
+    // ! 執行過程中，可能會被中斷，所以要記下上次執行到一半的結果，這個結果可能不等於當前渲染的結果
     // ! 確保在高優先級打斷當前渲染時，可以回退到一個穩定的狀態
     // ! memoizedState 是最後一次渲染計算的狀態結果
     // ! baseState 會是 commit 的結果
@@ -1098,7 +1133,7 @@ function updateReducerImpl(hook, current, reducer) {
           reducer(newState, action);
         }
         // ! hasEagerState : 是否已經提前計算好更新狀態了，可以直接拿取結果，不用再調用 reducer
-        // ! 在 dispatchAction 或 dispatchReducerAction 階段，如果當前狀態和更新的動作可以直接應用，React 會嘗試提前計算新狀態，並將其存儲在 eagerState 中。
+        // ! 在 dispatchAction，如果當前狀態和更新的動作可以直接應用，React 會嘗試提前計算新狀態，並將其存儲在 eagerState 中。
         if (update.hasEagerState) {
           // If this update is a state update (not a reducer) and was processed eagerly,
           // we can use the eagerly computed state
@@ -1155,6 +1190,7 @@ function updateState(initialState) {
 }
 ```
 
+![state 流程圖](./assets/state%20流程圖.png)
 ![hookstate](./assets/hooksState.png)
 
 ### 疑問？觀念面試題
@@ -1246,4 +1282,604 @@ setState(2); // 高優先級
 setState(3); // 低優先級
 ```
 
-![hookstate](./assets/hooksState.png)
+1. memoizedState(2，用于最新的 UI 渲染)，baseState(0，不會更新)
+2. 換低優先級處理時，重新計算所有低優先級更新，memoizedState(3)
+3. 所有更新完成，baseState(3)
+
+## effect hooks
+
+可作為 `componentDidMount` `componentDidUpdate` `componentWillUnmount` 這三個生命週期函數的組合。但他們只是類似。實際是不完全相同。`componentDidMount` 和 `useLayoutEffect` 理論上才是一致的。
+
+```ts
+useEffect(effect, deps?);
+
+useEffect(()=>{
+    console.log('setup')
+    return ()=>console.log('cleanup') // 卸載前執行
+ },[])
+```
+
+- `useEffect` `useLayoutEffect` 差別在於：
+
+  - useEffect 異步，useLayoutEffect 同步
+  - useEffect 瀏覽器完成渲染過後執行。useLayoutEffect 完成渲染之前
+
+### 初始：建立 effect，加入 fiber.updateQueue 中，同時 effect 也會放入 hook.memoizedState
+
+看源碼，初始階段：
+
+```ts
+function mountEffect(create, deps) {
+  mountEffectImpl(
+    PassiveEffect | PassiveStaticEffect,
+    HookPassive,
+    create,
+    deps
+  );
+}
+
+function mountLayoutEffect(create, deps) {
+  let fiberFlags = UpdateEffect | LayoutStaticEffect;
+  return mountEffectImpl(fiberFlags, HookLayout, create, deps);
+}
+
+function mountEffectImpl(fiberFlags, hookFlags, create, deps) {
+  const hook = mountWorkInProgressHook();
+  const nextDeps = deps === undefined ? null : deps;
+  currentlyRenderingFiber.flags |= fiberFlags;
+  hook.memoizedState = pushEffect(
+    HookHasEffect | hookFlags,
+    create,
+    createEffectInstance(),
+    nextDeps
+  );
+}
+```
+
+- flags: `UpdateEffect` | `LayoutStaticEffect` | `PassiveEffect` | `PassiveStaticEffect` ，會掛載到 fiber 上，不一定由 hooks 創建，也可能由類組件生命週期創建。
+- hookFlags: 用來標記 hooks 的，會放在 hook 鏈表中
+
+前面有提到型別，會建立 effect 後，放入 hook.memoizedState
+
+```ts
+  export type Hook = {
+    // 不同類型的 hook，存的內容不同
+    // useState / useReducer 存 state，
+    // useEffect / useLayoutEffect 存 effect 單向循環鏈表，指向最後一個 effect
+    memorizedState: any;
+
+    // 下一個 hook，如果是 null，表示他是最後一個 hook
+    next: Hook | null;
+
+    baseState: any; // 所有的 update 對象合併後的狀態（比方說setState多次調用
+    baseQueue: Update<any, any> | null; // 環形鏈表，只有包含高於本次渲染優先級的 update對象
+    queue:  UpdateQueue <any , any > | null; // 包括所有優先級的 update 對象
+  };
+
+  // 放在 fiber.updateQueue 上的資料結構
+  export type FunctionComponentUpdateQueue = {|
+    lastEffect: Effect | null, // 單向循環鏈表
+    stores: Array<StoreConsistencyCheck<any>> | null,
+  |};
+
+  type Effect = {
+    tag: HookFlags; // 標記 Hook 類型
+    create: () => (() => void) | void; // 就是放在 useEffect 和 useLayoutEffect 的第一個參數
+    destroy: (() => void) | void; // 就是放在 useEffect 和 useLayoutEffect 的第一個參數回傳的函式
+    deps: Array<any> | void | null; // 依賴項
+    next: null | Effect; // 指向下一個 effect，是單向循環鏈表
+  };
+```
+
+回到源碼
+
+```ts
+function pushEffect(tag, create, inst, deps) {
+  const effect = {
+    tag,
+    create,
+    inst,
+    deps,
+    // Circular
+    next: null,
+  };
+  // ! 獲取更新隊列，注意！是 fiber.updateQueue 上的
+  let componentUpdateQueue = currentlyRenderingFiber.updateQueue;
+  // ! 沒有隊列的話，先創建
+  if (componentUpdateQueue === null) {
+    componentUpdateQueue = createFunctionComponentUpdateQueue();
+    /**
+     * {
+      lastEffect: null,
+      events: null,
+      stores: null,
+    }
+     */
+    currentlyRenderingFiber.updateQueue = componentUpdateQueue;
+    componentUpdateQueue.lastEffect = effect.next = effect; // effect 是 單向循環鏈表
+  } else {
+    const lastEffect = componentUpdateQueue.lastEffect;
+    if (lastEffect === null) {
+      componentUpdateQueue.lastEffect = effect.next = effect; // effect 是 單向循環鏈表
+    } else {
+      const firstEffect = lastEffect.next;
+      lastEffect.next = effect;
+      effect.next = firstEffect;
+      componentUpdateQueue.lastEffect = effect;
+    }
+  }
+  return effect;
+}
+```
+
+### 更新：拿 deps 比對，根據情況加入到 effect 隊列中
+
+```ts
+function updateEffect(create, deps) {
+  updateEffectImpl(PassiveEffect, HookPassive, create, deps);
+}
+
+function updateLayoutEffect(create, deps) {
+  return updateEffectImpl(UpdateEffect, HookLayout, create, deps);
+}
+
+function updateEffectImpl(fiberFlags, hookFlags, create, deps) {
+  const hook = updateWorkInProgressHook();
+  const nextDeps = deps === undefined ? null : deps;
+  const effect = hook.memoizedState;
+  const inst = effect.inst;
+
+  // currentHook is null on initial mount when rerendering after a render phase
+  // state update or for strict mode.
+  // ! 組件是否在更新階段
+  if (currentHook !== null) {
+    if (nextDeps !== null) {
+      const prevEffect = currentHook.memoizedState; // effect 儲存在 hook.memoizedState 上
+      const prevDeps = prevEffect.deps;
+      // ! 依賴項是否發生變化
+      if (areHookInputsEqual(nextDeps, prevDeps)) {
+        hook.memoizedState = pushEffect(hookFlags, create, inst, nextDeps); // 沒有發生變化，在 fiber.updateQueue 中加入沒有 HookHasEffect 的 effect，同步把新的 effect 更新到 hook.memoizedState，就退出
+        return;
+      }
+    }
+  }
+  // 發生變化了
+  // ! 打上 tag：UpdateEffect | PassiveEffect
+  currentlyRenderingFiber.flags |= fiberFlags;
+  // ! 1. 保存 Effect
+  // ! 2. 構建 effect 鏈表
+  hook.memoizedState = pushEffect(
+    HookHasEffect | hookFlags, // 標記！HookHasEffect
+    create,
+    inst,
+    nextDeps
+  );
+}
+```
+
+流程圖
+
+```rust
+比對 deps，看是否有副作用，(沒有的話加入 updateQueue 加入沒有 HookHasEffect 的 effect，退出; 有的話，更新 fiber.flags，updateQueue 加入 effect)
+   |
+commit 階段
+   |
+commitRootImpl
+```
+
+### commit 處理 updateQueue
+
+```ts
+function commitRootImpl(
+  root,
+  recoverableErrors,
+  transitions,
+  renderPriorityLevel
+) {
+  console.log(
+    "%c [ commitRootImpl ]: ",
+    "color: #fff; background: darkblue; font-size: 13px;",
+    ""
+  );
+
+  do {
+    // `flushPassiveEffects` will call `flushSyncUpdateQueue` at the end, which
+    // means `flushPassiveEffects` will sometimes result in additional
+    // passive effects. So we need to keep flushing in a loop until there are
+    // no more pending effects.
+    // TODO: Might be better if `flushPassiveEffects` did not automatically
+    // flush synchronous work at the end, to avoid factoring hazards like this.
+    // ! 處理 useEffect, useLayoutEffect cleanup ， setup
+    // ! 但 setup 不是在這裡執行，因為是異步的
+    flushPassiveEffects();
+    // ! rootDoesHavePassiveEffects: 記載是否有上次遺留下來的副作用
+  } while (rootWithPendingPassiveEffects !== null);
+  // 省略
+}
+```
+
+#### 為什麼要判斷 rootWithPendingPassiveEffects
+
+`rootDoesHavePassiveEffects`: 記載 root 是否有未執行副作用，會在 BeforeMutation 階段處理副作用時，設定成 true，完全處理完後，設置為 null，所以可能在進入下一次的 commit 一直未處理完成，需要處理。
+
+這樣設計也是避免重複調度 `flushPassiveEffects`。
+
+- 在執行 effect 之前，必需要判斷是否還有未完成的 effect，是為什麼呢？
+  commit 中會分三步驟來處理 effect
+
+  - 刪除不需要的節點時，執行 cleanup
+  - 同步執行 `useLayoutEffect` 的 setup、cleanup
+  - 非同步執行 `useEffect` 的 setup、cleanup
+
+  而非同步執行的 `useEffect` 不在當前的 commit 階段完成，會被調度到下一個空閑時段或是微任務隊列當中。
+
+  在某些情況下，會讓 effect 再被延後執行：
+
+  - 多個更新產生競爭：如果用戶在 `useEffect` 中，又調度了 `setState` ，react 就無法立即處理完剩下的 effect ，會立刻又發起調度更新，只能紀錄未完成的工作，下一次在處理。
+  - `useEffect` 是異步的：會透過 scheduler 以正常優先級加入任務隊列，如果又被打斷，就又要再發起調度處理，而且也不一定會在該批次得到處理，又被延後。
+  - `useEffect` 的 cleanup 涉及異步操作：比如取消訂閱 api、清理 websocket 連線，react 需要追蹤哪些操作尚未完成，看是否再發起調度。
+
+  所以，react 設定了一個變數 `rootWithPendingPassiveEffects`，來紀錄是否有上一次還沒處理完成的 effect，發起 `flushPassiveEffects`。
+
+#### flushPassiveEffects
+
+`flushPassiveEffects`，會遍歷 fiber.updateQueue，針對 effect.tag 是 HookPassive 的副作用，執行卸載的 destory 邏輯，並對新的更新的 effect 執行它 create 創建邏輯並且掛上 destory。
+
+```ts
+function flushPassiveEffectsImpl() {
+  if (rootWithPendingPassiveEffects === null) {
+    return false;
+  }
+
+  // Cache and clear the transitions flag
+  const transitions = pendingPassiveTransitions;
+  pendingPassiveTransitions = null;
+
+  const root = rootWithPendingPassiveEffects;
+  const lanes = pendingPassiveEffectsLanes;
+
+  // !!! 被設置成 null
+  rootWithPendingPassiveEffects = null;
+
+  // ... 省略
+
+  // ! commit 階段
+  const prevExecutionContext = executionContext;
+  executionContext |= CommitContext;
+
+  // ! 如果是更新階段，執行 cleanup 函式
+  commitPassiveUnmountEffects(root.current);
+  // ! setup 函式
+  commitPassiveMountEffects(root, root.current, lanes, transitions);
+
+  // ... 省略
+
+  return true;
+}
+```
+
+`commitPassiveUnmountEffects` - `commitPassiveUnmountOnFiber` 會對整顆 fiber 樹遞歸，找到有 `useEffect` 的節點。如果節點刪除就需要調用卸載，如果沒有刪除，則是進行銷毀和重新掛載。
+
+經過這個流程，我們整棵 fiber 樹中有 ChildDeletion 和 Passive 標記的 fiber 中的卸載方法就全都執行了。
+
+`commitPassiveMountEffects` 也一樣遞歸樹，主要的工作是取得我們 fiber.updateQueue 的 effect，把其 create 函數執行，取得 destroy 函數掛載上去。
+
+經過上面的步驟，我們的已經清空了我們之前待執行的 effect。當然如果之前沒有待處理的就會跳過。
+
+進入 commit 三階段。
+如果我們當前的 fiber 或孩子上有 useEffect 相關的副作用，我們使用 scheduleCallback 開啟一個任務執行 flushPassiveEffects 函數，與此同時它把 `rootDoesHavePassiveEffects` 這個變數設定為了 `true`，記住這個點它很重要！
+
+```ts
+function commitRootImpl(
+  root,
+  recoverableErrors,
+  transitions,
+  renderPriorityLevel
+) {
+  console.log(
+    "%c [ commitRootImpl ]: ",
+    "color: #fff; background: darkblue; font-size: 13px;",
+    ""
+  );
+
+  do {
+    flushPassiveEffects();
+  } while (rootWithPendingPassiveEffects !== null);
+
+  const finishedWork = root.finishedWork;
+  const lanes = root.finishedLanes;
+
+  root.finishedWork = null;
+  root.finishedLanes = NoLanes;
+
+  // commitRoot never returns a continuation; it always finishes synchronously.
+  // So we can clear these now to allow a new callback to be scheduled.
+  root.callbackNode = null;
+  root.callbackPriority = NoLane;
+  root.cancelPendingCommit = null;
+
+  // Check which lanes no longer have any work scheduled on them, and mark
+  // those as finished.
+  // ! 剩下還需要更新的優先級
+  let remainingLanes = mergeLanes(finishedWork.lanes, finishedWork.childLanes);
+
+  // Make sure to account for lanes that were updated by a concurrent event
+  // during the render phase; don't mark them as finished.
+  const concurrentlyUpdatedLanes = getConcurrentlyUpdatedLanes();
+  remainingLanes = mergeLanes(remainingLanes, concurrentlyUpdatedLanes);
+  // ! 清理掉已經更新的優先級
+  markRootFinished(root, remainingLanes);
+
+  // If there are pending passive effects, schedule a callback to process them.
+  // Do this as early as possible, so it is queued before anything else that
+  // might get scheduled in the commit phase. (See #16714.)
+  // TODO: Delete all other places that schedule the passive effect callback
+  // They're redundant.
+  if (
+    (finishedWork.subtreeFlags & PassiveMask) !== NoFlags ||
+    (finishedWork.flags & PassiveMask) !== NoFlags
+  ) {
+    // !!!! 這裡才是回調 effect
+    if (!rootDoesHavePassiveEffects) {
+      // ! 標記有副作用
+      rootDoesHavePassiveEffects = true;
+      pendingPassiveEffectsRemainingLanes = remainingLanes;
+      // workInProgressTransitions might be overwritten, so we want
+      // to store it in pendingPassiveTransitions until they get processed
+      // We need to pass this through as an argument to commitRoot
+      // because workInProgressTransitions might have changed between
+      // the previous render and commit if we throttle the commit
+      // with setTimeout
+      pendingPassiveTransitions = transitions;
+      // !!!!!! 1. 異步處理 passive effect
+      scheduleCallback(NormalSchedulerPriority, () => {
+        flushPassiveEffects();
+        // This render triggered passive effects: release the root cache pool
+        // *after* passive effects fire to avoid freeing a cache pool that may
+        // be referenced by a node in the tree (HostRoot, Cache boundary etc)
+        return null;
+      });
+    }
+  }
+
+  // Check if there are any effects in the whole tree.
+  // TODO: This is left over from the effect list implementation, where we had
+  // to check for the existence of `firstEffect` to satisfy Flow. I think the
+  // only other reason this optimization exists is because it affects profiling.
+  // Reconsider whether this is necessary.
+  const subtreeHasEffects =
+    (finishedWork.subtreeFlags &
+      (BeforeMutationMask | MutationMask | LayoutMask | PassiveMask)) !==
+    NoFlags;
+  const rootHasEffect =
+    (finishedWork.flags &
+      (BeforeMutationMask | MutationMask | LayoutMask | PassiveMask)) !==
+    NoFlags;
+
+  if (subtreeHasEffects || rootHasEffect) {
+    const prevTransition = ReactCurrentBatchConfig.transition;
+    ReactCurrentBatchConfig.transition = null;
+    const previousPriority = getCurrentUpdatePriority();
+    setCurrentUpdatePriority(DiscreteEventPriority);
+
+    const prevExecutionContext = executionContext;
+    //! 標記 commit 階段
+    executionContext |= CommitContext;
+
+    // Reset this to null before calling lifecycles
+    ReactCurrentOwner.current = null;
+
+    // The commit phase is broken into several sub-phases. We do a separate pass
+    // of the effect list for each phase: all mutation effects come before all
+    // layout effects, and so on.
+
+    // The first phase a "before mutation" phase. We use this phase to read the
+    // state of the host tree right before we mutate it. This is where
+    // getSnapshotBeforeUpdate is called.
+    // ! 2. before mutation( dom 操作之前)
+    // ! 觸發生命週期 getSnapShotBeforeUpdate
+    // ! 處理DOM節點渲染/刪除後的focus和blur邏輯。之後深度遍歷直到沒有孩子為止
+    const shouldFireAfterActiveInstanceBlur = commitBeforeMutationEffects(
+      root,
+      finishedWork
+    );
+
+    // The next phase is the mutation phase, where we mutate the host tree.
+    // ! 3. mutation 階段(包含DOM 變更)
+    commitMutationEffects(root, finishedWork, lanes);
+
+    if (enableCreateEventHandleAPI) {
+      if (shouldFireAfterActiveInstanceBlur) {
+        afterActiveInstanceBlur();
+      }
+    }
+    resetAfterCommit(root.containerInfo);
+
+    // The work-in-progress tree is now the current tree. This must come after
+    // the mutation phase, so that the previous tree is still current during
+    // componentWillUnmount, but before the layout phase, so that the finished
+    // work is current during componentDidMount/Update.
+    // ! 4. 新的樹生成完畢，取代成為 current 樹
+    root.current = finishedWork;
+
+    // ! 4. layout 階段
+    // componentDidUpdate 的執行時機和 effect 明顯不同
+    commitLayoutEffects(finishedWork, root, lanes);
+
+    // Tell Scheduler to yield at the end of the frame, so the browser has an
+    // opportunity to paint.
+    requestPaint();
+
+    executionContext = prevExecutionContext;
+
+    // Reset the priority to the previous non-sync value.
+    setCurrentUpdatePriority(previousPriority);
+    ReactCurrentBatchConfig.transition = prevTransition;
+  } else {
+    // ! 沒有任何副作用的情況
+    // No effects.
+    root.current = finishedWork;
+    // Measure these anyway so the flamegraph explicitly shows that there were
+    // no effects.
+    // TODO: Maybe there's a better way to report this.
+    if (enableProfilerTimer) {
+      recordCommitTime();
+    }
+  }
+
+  const rootDidHavePassiveEffects = rootDoesHavePassiveEffects;
+  // ! 處理 useEffect 相關內容
+  if (rootDoesHavePassiveEffects) {
+    // This commit has passive effects. Stash a reference to them. But don't
+    // schedule a callback until after flushing layout work.
+    rootDoesHavePassiveEffects = false;
+    rootWithPendingPassiveEffects = root;
+    pendingPassiveEffectsLanes = lanes;
+  } else {
+    // There were no passive effects, so we can immediately release the cache
+    // pool for this render.
+    releaseRootPooledCache(root, remainingLanes);
+  }
+
+  // Read this again, since an effect might have updated it
+  remainingLanes = root.pendingLanes;
+
+  // Always call this before exiting `commitRoot`, to ensure that any
+  // additional work on this root is scheduled.
+  // ! 觸發一次新的調度，確保任何新的附加上去的任務被調度
+  ensureRootIsScheduled(root);
+
+  // If the passive effects are the result of a discrete render, flush them
+  // synchronously at the end of the current task so that the result is
+  // immediately observable. Otherwise, we assume that they are not
+  // order-dependent and do not need to be observed by external systems, so we
+  // can wait until after paint.
+  // TODO: We can optimize this by not scheduling the callback earlier. Since we
+  // currently schedule the callback in multiple places, will wait until those
+  // are consolidated.
+  if (includesSyncLane(pendingPassiveEffectsLanes) && root.tag !== LegacyRoot) {
+    flushPassiveEffects();
+  }
+
+  // Read this again, since a passive effect might have updated it
+  remainingLanes = root.pendingLanes;
+  if (includesSyncLane(remainingLanes)) {
+    if (enableProfilerTimer && enableProfilerNestedUpdatePhase) {
+      markNestedUpdateScheduled();
+    }
+
+    // Count the number of times the root synchronously re-renders without
+    // finishing. If there are too many, it indicates an infinite update loop.
+    if (root === rootWithNestedUpdates) {
+      nestedUpdateCount++;
+    } else {
+      nestedUpdateCount = 0;
+      rootWithNestedUpdates = root;
+    }
+  } else {
+    nestedUpdateCount = 0;
+  }
+
+  // If layout work was scheduled, flush it now.
+  // ! 執行所有同步任務
+  flushSyncWorkOnAllRoots();
+
+  if (enableSchedulingProfiler) {
+    markCommitStopped();
+  }
+
+  if (enableTransitionTracing) {
+    // We process transitions during passive effects. However, passive effects can be
+    // processed synchronously during the commit phase as well as asynchronously after
+    // paint. At the end of the commit phase, we schedule a callback that will be called
+    // after the next paint. If the transitions have already been processed (passive
+    // effect phase happened synchronously), we will schedule a callback to process
+    // the transitions. However, if we don't have any pending transition callbacks, this
+    // means that the transitions have yet to be processed (passive effects processed after paint)
+    // so we will store the end time of paint so that we can process the transitions
+    // and then call the callback via the correct end time.
+    const prevRootTransitionCallbacks = root.transitionCallbacks;
+    if (prevRootTransitionCallbacks !== null) {
+      schedulePostPaintCallback((endTime) => {
+        const prevPendingTransitionCallbacks =
+          currentPendingTransitionCallbacks;
+        if (prevPendingTransitionCallbacks !== null) {
+          currentPendingTransitionCallbacks = null;
+          scheduleCallback(IdleSchedulerPriority, () => {
+            processTransitionCallbacks(
+              prevPendingTransitionCallbacks,
+              endTime,
+              prevRootTransitionCallbacks
+            );
+          });
+        } else {
+          currentEndTime = endTime;
+        }
+      });
+    }
+  }
+
+  return null;
+}
+```
+
+mutation 階段， `commitMutationEffects` - `commitMutationEffectsOnFiber`，處理 DOM 操作 - 增刪改，在處理刪除中，遍歷副作用鏈表，對於帶有 tag 是 `HookLayout` 的副作用 (`useLayoutEffect`)，執行 `destroy` 銷毀函式; 和新增 `create` 邏輯和掛載新的`destroy` 銷毀函式。
+
+接著，如果 `rootDoesHavePassiveEffects` = `true` ，`rootWithPendingPassiveEffects` 設定成 `root`，`rootDoesHavePassiveEffects` 設定成 `false`，執行 `flushPassiveEffectsImpl`。
+
+### 重點整理
+
+![effect 流程圖](./assets/effect%20流程圖.png)
+
+- **初次渲染階段**：
+  - `mountEffectImpl`：將 effect 放入 fiber.memoizedState 的 hook 的 memoizedState 上，並將 effect 尾插到 fiber.updateQueue 的 effects 鏈表中。
+  - 這些 effects 包括 `useEffect` 和 `useLayoutEffect`，且尚未執行。
+- **更新階段**：
+
+  - `updateEffectImpl`：比對 `deps`，判斷是否需要執行副作用。
+    - 如果 `deps` 未變化，effect 不會被標記為需要執行 (`HookHasEffect` 不會設置)。
+    - 如果 `deps` 變化，effect 被標記為 `HookHasEffect`，fiber 的 `flags` 會更新（例如增加 `Passive` 或 `Update` flag）。
+    - 更新的 effect 會被追加到 fiber.updateQueue 中。
+    - **`commit` 階段 (`commitRootImpl`)**：
+  - **處理上一次遺留的副作用**：
+
+    - 如果存在 `rootWithPendingPassiveEffects`，調用 `flushPassiveEffects`。
+      - 執行上一次 `useEffect` 的 `destroy`。
+      - 執行新的 `create` 邏輯，並將新的 `destroy` 函數掛載。
+    - 清空 `rootWithPendingPassiveEffects`。
+
+  - **判斷是否有新的 HookPassive effect**：
+
+    - 如果有，將 `rootDoesHavePassiveEffects` 設為 `true`，並啟動一次異步調度以處理這些副作用。
+
+  - **處理同步 effect（`useLayoutEffect`）**：
+
+    - **Mutation 階段**：執行上一次的 `useLayoutEffect` 的 `destroy`。
+    - **Layout 階段**：執行新的 `useLayoutEffect` 的 `create` 邏輯，並掛載新的 `destroy`。
+
+  - **結束 commit 階段**：
+    - 如果有新的 HookPassive effect，將根節點（`root`）賦值給 `rootWithPendingPassiveEffects`，以便異步調度可以使用這些 effect。
+    - 當異步調度真正執行時：
+      - 如果被打斷，會在下次 commit 開始時清空未完成的副作用。
+      - 如果執行完成，將 `rootWithPendingPassiveEffects` 設為 `null`。
+
+- **異步調度的 `flushPassiveEffects` 階段**：
+  - 處理所有掛起的 `useEffect` 副作用（包括 `destroy` 和 `create`）。
+  - 清空 `rootWithPendingPassiveEffects`，確保不會遺留副作用。
+
+🌟 useEffect 不完全等於 componentDidMount 只能說是替代，是為什麼呢？
+
+| 特性           | componentDidMount  | useEffect          |
+| -------------- | ------------------ | ------------------ |
+| 執行階段       | commit-Layout      | commit 完成後      |
+| 執行方式       | 同步               | 異步               |
+| DOM 是否已更新 | 是，可同步操作 DOM | 是，可異步操作 DOM |
+| 是否阻塞渲染   | 是                 | 否                 |
+
+其實 `useLayoutEffect` 和 `componentDidMount` 執行時機比較接近，都在 DOM 更新完成后"同步"执行，可以直接操作 DOM。在瀏覽器繪製之前執行。
+
+| 階段                    | 時機            | 主要任務                                                                                                   | 特點                                              |
+| ----------------------- | --------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| commit(before mutation) | 在 DOM 更新之前 | 捕獲 DOM 之前的快照，準備 DOM 修改任務，執行類組件生命週 `getSnapshotBeforeUpdate`，觸發 hook 的 `cleanup` | 紀錄更新前狀態（如滾動前位置）不會對 DOM 作出修改 |
+| mutation                | 在 DOM 更新時   | 執行 DOM 增刪改，處理 Ref，標記需要執行 LayoutEffect 的節點，搜集起來                                      | 會同步完成 DOM 的修改，可能會影響性能             |
+| Layout                  | 在 DOM 更新後   | 觸發佈局相關任務，例如 componentDidUpdate 和 useLayoutEffect                                               | 已完成更新，可以安全的操作 DOM 或是測量佈局       |
