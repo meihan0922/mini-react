@@ -70,6 +70,8 @@ flowchart TB
 const minHeapSort = (arr) => {
   // 構造最小堆
   buildMinHeap(arr); // [0, 4, 1, 10, 8, 6, 5]
+
+  // 在做降序陣列
   // 從根節點，最小的開始做排序！把第一個跟最後一個做交換
   for (let i = arr.length - 1; i > 0; i--) {
     // 交換位置
@@ -105,13 +107,14 @@ const siftDown = (arr, startIndex, endIndex) => {
   let idx = startIndex;
   // 如果有這個子節點的話
   if (leftChildIndex <= endIndex) {
+    // 如果左子節點，比父節點還要小，紀錄左子節點位置
     if (arr[leftChildIndex] < arr[startIndex]) {
       idx = leftChildIndex;
     }
   }
   // 如果有這個子節點的話
   if (righChildtIndex <= endIndex) {
-    // 如果右子節點最小，比父節點和左子節點還要小
+    // 如果右子節點最小，比父節點和左子節點還要小，紀錄右子節點位置
     if (
       arr[righChildtIndex] < arr[startIndex] &&
       arr[righChildtIndex] < arr[leftChildIndex]
@@ -119,6 +122,7 @@ const siftDown = (arr, startIndex, endIndex) => {
       idx = righChildtIndex;
     }
   }
+  // 如果紀錄的位置有變化，子節點其一比父節點小
   if (idx !== startIndex) {
     // 交換位置
     [arr[startIndex], arr[idx]] = [arr[idx], arr[startIndex]];
@@ -203,7 +207,27 @@ classDef change fill:#ff1
 
 ```mermaid
 ---
-title: 從根節點，最小的開始做排序！把第一個跟最後一個做交換
+title: 已經完成最小堆
+---
+flowchart TB
+0(0
+idx:0):::someclass--> 4(4
+idx:1)
+0 --> 1(1
+idx: 2)
+4 --> 10(10
+idx:3)
+4 --> 8(8
+idx:4)
+1 --> 6(6
+idx:5)
+1 --> 5(5
+idx:6):::change
+```
+
+```mermaid
+---
+title: 如果要做排序！把第一個跟最後一個做交換，提取最小值放後面
 ---
 flowchart TB
 0(0

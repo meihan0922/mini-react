@@ -1,3 +1,26 @@
+- [hooks](#hooks)
+  - [renderWithHooks](#renderwithhooks)
+  - [型別](#--)
+  - [所有 hook 共同調用的函式](#---hook--------)
+    - [初始化 - mountWorkInProgressHook](#------mountworkinprogresshook)
+    - [更新 - updateWorkInProgressHook](#-----updateworkinprogresshook)
+  - [緩存 hooks - useCallback, useMemo](#---hooks---usecallback--usememo)
+    - [順便看 memo 源碼](#----memo---)
+  - [緩存 hooks - useRef](#---hooks---useref)
+    - [總結](#--)
+    - [另補充 forwardRef](#----forwardref)
+  - [狀態 hooks - useState, useReducer](#---hooks---usestate--usereducer)
+    - [疑問？觀念面試題](#--------)
+    - [useState 和 useReducer 比較](#usestate---usereducer---)
+      - [優先級問題](#-----)
+  - [effect hooks](#effect-hooks)
+    - [初始：建立 effect，加入 fiber.updateQueue 中，同時 effect 也會放入 hook.memoizedState](#------effect----fiberupdatequeue------effect------hookmemoizedstate)
+    - [更新：拿 deps 比對，根據情況加入到 effect 隊列中](#-----deps------------effect----)
+    - [commit 處理 updateQueue](#commit----updatequeue)
+      - [為什麼要判斷 rootWithPendingPassiveEffects](#-------rootwithpendingpassiveeffects)
+      - [flushPassiveEffects](#flushpassiveeffects)
+    - [重點整理](#----)
+
 # hooks
 
 ## renderWithHooks
