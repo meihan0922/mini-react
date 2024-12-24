@@ -139,6 +139,7 @@ function updateContextProvider(current: Fiber | null, workInProgress: Fiber) {
    *     <Child /> // 處理到他的時候，應該要只剩下 [countContext]
    *  </CountContext.Provider>
    */
+  // debugger;
   const context = workInProgress.type._context;
   const value = workInProgress.pendingProps.value;
   pushProvider(context, value);
@@ -229,11 +230,11 @@ function reconcileChildren(
   workInProgress: Fiber,
   nextChildren: any
 ) {
-  console.log(
-    "%c [ current ]: ",
-    "color: #bf2c9f; background: pink; font-size: 13px;",
-    current
-  );
+  // console.log(
+  //   "%c [ current ]: ",
+  //   "color: #bf2c9f; background: pink; font-size: 13px;",
+  //   current
+  // );
   // 初次渲染
   if (current === null) {
     workInProgress.child = mountChildFibers(workInProgress, null, nextChildren);

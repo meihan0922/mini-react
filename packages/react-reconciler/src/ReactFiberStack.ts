@@ -13,6 +13,11 @@ export function push<T>(cursor: StackCursor<T>, value: T): void {
   valueStack[index] = cursor.current;
   // cursor.current 紀錄棧尾元素
   cursor.current = value;
+  // console.log(
+  //   "%cpackages/react-reconciler/src/ReactFiberStack.ts:16 valueStack",
+  //   "color: #26bfa5;",
+  //   valueStack
+  // );
 }
 
 export function pop<T>(cursor: StackCursor<T>): void {
@@ -22,4 +27,9 @@ export function pop<T>(cursor: StackCursor<T>): void {
   // 上一個棧尾元素 = null
   valueStack[index] = null;
   index--;
+  // console.log(
+  //   "%cpackages/react-reconciler/src/ReactFiberStack.ts:16 valueStack",
+  //   "color: #26bfa5;",
+  //   valueStack
+  // );
 }

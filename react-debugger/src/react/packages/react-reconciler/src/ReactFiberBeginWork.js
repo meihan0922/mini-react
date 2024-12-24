@@ -3398,7 +3398,7 @@ function updateContextProvider(current, workInProgress, renderLanes) {
       checkPropTypes(providerPropTypes, newProps, "prop", "Context.Provider");
     }
   }
-
+  // ! 推入內存的 context 陣列，儲存前 Provider context 的前值
   pushProvider(workInProgress, context, newValue);
 
   if (enableLazyContextPropagation) {
@@ -3422,6 +3422,7 @@ function updateContextProvider(current, workInProgress, renderLanes) {
           );
         }
       } else {
+        // ! 尋找所有匹配的 消費者，標記更新
         // The context value changed. Search for matching consumers and schedule
         // them to update.
         propagateContextChange(workInProgress, context, renderLanes);
@@ -3476,8 +3477,9 @@ function updateContextConsumer(current, workInProgress, renderLanes) {
       );
     }
   }
-
+  // ! 如果目前節點沒有dependencies 鍊錶，則初始化一個鍊錶，這個鍊錶用於我們掛載context 元素。
   prepareToReadContext(workInProgress, renderLanes);
+  // ! 得到最新的 context value，它會收集組件所依賴的所有不同的context，則將context 加入到fiber.dependencies鍊錶中
   const newValue = readContext(context);
   if (enableSchedulingProfiler) {
     markComponentRenderStarted(workInProgress);

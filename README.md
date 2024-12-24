@@ -93,9 +93,34 @@
 
 # mini-react
 
+這個專案，主要是實現 react 的基本架構，包含 hooks、context、diff 等等。並沒有完整的造出輪子。
+
+基於 mono-repo 使用 pnpm，管理框架。
+資料夾結構如下
+
+- react-debugger：把 react v18.2 搬入，並使用 vite 運行，可以在源碼中加入 debugger 和 console.log 看清流程。也有寫相關的筆記。
+- packages: mini-react 實現，主要簡單的做六個包
+  - react
+  - react-dom
+  - react-dom-bindings
+  - react-reconclier
+  - scheduler
+  - shared
+- examples: 使用 mini-react，實踐 UI vite 小專案，邊開發邊除錯。
+
+- 指令
+  - `pnpm run dev` - 用來開發 mini-react
+  - `pnpm run dev-debugger` - 用來看源碼
+
+這篇文章主要是寫實現小框架的過程，
+專案內還有其他延伸主題筆記與流程圖：
+
+- [react 工作流程整理筆記](./react%20工作流程.md)
 - [scheduler 筆記及實現整理筆記](./packages/scheduler/README.md)
 - [二叉堆算法筆記及實現整理筆記](./packages/scheduler/heap.md)
-- [react 工作流程整理筆記](./react%20工作流程.md)
+- [Hooks 圖解＋源碼整理筆記](./Hooks.md)
+- [深度優先算法+react completeWork 應用筆記](./DFS.md)
+- [props.children 應用技術文筆記](./children.md)
 - [react 圖解重點筆記](./assets/flowNote.pdf)
   ![react 圖解重點筆記](./assets/flowNote.png)
 
@@ -114,25 +139,6 @@
   - react-dom：瀏覽器環境
   - shared：共享的輔助方法
   - react-dom-bindings: 事件處理
-
-## 初步創建框架
-
-基於 mono-repo 使用 pnpm，管理框架。
-資料夾結構如下
-
-- react-debugger：把 react v18.2 搬入，並使用 vite 運行，可以在源碼中加入 debugger 和 console.log 看清流程。
-- packages: mini-react 實現，主要簡單的做六個包
-  - react
-  - react-dom
-  - react-dom-bindings
-  - react-reconclier
-  - scheduler
-  - shared
-- examples: 使用 mini-react 實踐使用場景，邊開發邊除錯。
-
-- 指令
-  - `pnpm run dev` - 用來開發 mini-react
-  - `pnpm run dev-debugger` - 用來看源碼
 
 ## jsx
 
@@ -4273,70 +4279,137 @@ function commitPassiveEffects(finishedWork: Fiber) {
 
 - 使用時機：當父組件想要和後代組件要跨層級溝通。
 - 使用方式：
-  1. 創建 Context 對象：可以設置預設值，如果缺少匹配的 Provider 後代組件將會讀取這裡的默認值。
+
+  1. 創建 Context 對象：Provider 提供的值才是預設值，如果缺少匹配的 Provider 後代組件才會讀取這裡的默認值。
+
+     ```ts
+     const Context = React.createContext("default-value");
+     ```
+
   2. Provider 傳遞值給後代組件，。
   3. 後代組件消費 value，會一直往上找到**最近也匹配的** Provider:
+
      1. contextType: 只能用在 _類組件_，且只能訂閱單一的 context 來源 (這個值名稱不能更動)
      2. useContext: 只能用在 _函式組件_ 或是 _自定義的 Hook 中_
      3. Consumer 組件: 無限制
-  4. 只有訂閱 context 的組件會更新，其他不受影響！但要注意 Provider state 應該要另外封裝使用，用 useMemo 包住（避免 Provider re-render，他的所有訂閱者都會更新，即使 value 沒有發生變化），children 以 props 傳入（一種 composition 的優化作法），如此可以確保在資料改變時，只有使用到此資料的 Consumer 元件會 re-render。
 
-```tsx
-// 1. 創建 context
-const CountContext = createContext(0);
-const ColorContext = createContext("red");
+     ```tsx
+     // 1. 創建 context
+     const CountContext = createContext(0);
+     const ColorContext = createContext("red");
 
-const Child = () => {
-  // 3-2. 後代組件消費 value
-  const count = useContext(CountContext);
-  return (
-    <div>
-      <h1>{count}</h1>
-      {/* 3-3. 後代組件消費 */}
-      <ColorContext.Consumer>
-        {(theme) => (
-          <div>
-            {theme}
-            <CountContext.Consumer>
-              {(value) => <p>{value}</p>}
-            </CountContext.Consumer>
-          </div>
-        )}
-      </ColorContext.Consumer>
-    </div>
-  );
-};
+     const Child = () => {
+       // 3-2. 後代組件消費 value
+       const count = useContext(CountContext);
+       return (
+         <div>
+           <h1>{count}</h1>
+           {/* 3-3. 後代組件消費 */}
+           <ColorContext.Consumer>
+             {(theme) => (
+               <div>
+                 {theme}
+                 <CountContext.Consumer>
+                   {(value) => <p>{value}</p>}
+                 </CountContext.Consumer>
+               </div>
+             )}
+           </ColorContext.Consumer>
+         </div>
+       );
+     };
 
-function Comp() {
-  const [count, setCount] = useReducer((x) => x + 1, 0);
-  useEffect(() => {
-    console.log("useEffect");
-  }, []);
+     function Comp() {
+       const [count, setCount] = useReducer((x) => x + 1, 0);
+       useEffect(() => {
+         console.log("useEffect");
+       }, []);
 
-  useLayoutEffect(() => {
-    console.log("useLayoutEffect");
-  }, [count]);
+       useLayoutEffect(() => {
+         console.log("useLayoutEffect");
+       }, [count]);
 
-  return (
-    // 2. 創建 Provider 組件，對後代對象組件進行傳遞 value
-    <div>
-      <CountContext.Provider value={count}>
-        <ColorContext.Provider value="green">
-          <CountContext.Provider value={count + 1}>
-            <button onClick={() => setCount()}>add</button>
-            <Child />
-          </CountContext.Provider>
-        </ColorContext.Provider>
-        <Child />
-      </CountContext.Provider>
-    </div>
-  );
-}
-```
+       return (
+         // 2. 創建 Provider 組件，對後代對象組件進行傳遞 value
+         <div>
+           <CountContext.Provider value={count}>
+             <ColorContext.Provider value="green">
+               <CountContext.Provider value={count + 1}>
+                 <button onClick={() => setCount()}>add</button>
+                 <Child />
+               </CountContext.Provider>
+             </ColorContext.Provider>
+             <Child />
+           </CountContext.Provider>
+         </div>
+       );
+     }
+     ```
+
+  4. 只有訂閱 context 的組件會更新，其他不受影響！但要注意 Provider state 應該要另外封裝使用，用 useMemo 包住（避免 Provider re-render，他的所有訂閱者都會更新，即使 value 沒有發生變化），children 以 props 傳入（一種 composition 的優化作法），如此可以確保在資料改變時，只有使用到此資料的 Consumer 元件會 re-render。[關於 children 改變可以看個筆記]('./children.md')。
+
+     ```tsx
+     // 要怎麼阻止 wrapper 在 provider 發生變動時，跟著渲染？
+     export default function CounterBestPractice() {
+       return (
+         <div className="container">
+           <CounterProvider>
+             <Wrapper>
+               <Counter name="first" />
+             </Wrapper>
+             <Wrapper>
+               <Counter name="second" />
+             </Wrapper>
+           </CounterProvider>
+         </div>
+       );
+     }
+     // 如果 Wrapper 以 CounterProvider 為 props.children 的方式往下傳遞，
+     // 把 Provider 另外封裝，利用 props.children 的特性，沒改變就不會重新渲染的特性，就可以略過沒有訂閱的中間層。
+
+     const CounterContext = createContext(undefined);
+
+     // children 一直都不變，所以子節點不會重新渲染
+     export function CounterProvider({ defaultCount = 0, children }) {
+       // 將資料放在 Provider，而不是放在使用 Provider 的元件才透過 "value" 傳進來
+       // 其他的部分把 children 當成 props 傳進來
+       // 如此可以確保在資料改變時，只有使用到此資料的 Consumer 元件會 re-render
+       const [count, setCount] = useState(defaultCount); // 也可以使用 useReducer，都一樣
+
+       const addCount = useCallback(() => {
+         setCount((prevCount) => prevCount + 1);
+       }, []);
+
+       // 如果沒有把它 memo 起來，一旦 CounterProvider re-render，其所有的
+       // consumer 都會 re-render（即使 counter 沒有改變）
+       const counterContextData: ICounterContextData = useMemo(() => {
+         return {
+           addCount,
+           count,
+         };
+       }, [addCount, count]);
+
+       return (
+         <CounterContext.Provider value={counterContextData}>
+           {/* 這裡用到 component composition 的優化技巧 */}
+           {children}
+         </CounterContext.Provider>
+       );
+     }
+
+     export function useCounter() {
+       const counterContextData = useContext(CounterContext);
+       return counterContextData;
+     }
+
+     // Counter 又可以訂閱到 context，完成它自己的更新。
+     ```
 
 ### 模擬 context
 
-！沒有判斷實現訂閱者更新的部分。
+！注意，此實現代碼，沒有做訂閱者更新的部分。
+
+一開始需要創建 context，在消費者中讀取它。
 
 #### 結構
 
@@ -4428,24 +4501,32 @@ export function createFiberFromTypeAndProps(
 
 #### beginWork 處理 `<Provider>`
 
-考慮到所有的 context 都有初始值(createContext(defaultVal))，而 context 又有可以被重複使用的特性。在執行的順序會只讀取到最近的那個 context value，所以必須在製作 fiber 階段先儲存起來(`context._currentValue` 也指向最新的值），供後代消費，在使用完成(Child 已經執行完畢) completeWork 時，刪除，避免重複讀取。
+考慮到 Provider 和 context 都有初始值，而 Provider 又可以嵌套，等於 context 又有可以被重複使用的特性。在執行的順序會只讀取到最近的那個 context value，所以必須在製作 fiber 階段(`beginWork`)先儲存起來 (`context._currentValue` 也指向最新的值），供後代消費，completeWork 時，回復前狀態。
 
 - 概念：
-  - stack 裝 Context.Provider 上 `context._currentValue` 的初始值。比如有 n 個 value，把 n-1 個 value 放到 stack 當中，指針 cursor 則保留最後的值，方便讀取元素。
+
+  - context stack:
+    1. react 透過堆棧來管理當前上下文的值，這樣可以實現嵌套的 Provider。
+    2. 當一個新的 Provider 被處理時，會將其 value 推了堆棧，被處理完時，從堆棧彈出，恢復之前的值。
+  - default value: 當沒有 Provider 匹配時，會回退到 context.\_currentValue 上的預設值。
+  - fiber 上的 context:
+
+    - context.\_currentValue：目前正在使用的值，會隨著嵌套的 Provider 改變。
+    - context.\_currentRenderer：標記目前的渲染器，保證不同渲染器（例如 SSR 和 CSR）能正確區分。
+
+  - 通過指針管理： React 通過一個全局的指針（如 contextStackCursor）記錄當前堆棧的棧尾。當 Provider 的 value 更新時，該值會被推入堆棧，並修改 context.\_currentValue 指向最新的值。
     - 為什麼要用 stack 來儲存呢？因為 Provider 預期並不會這麼多，每個子節點都要向上尋找太麻煩。依賴 stack 做存提是比較高效的，stack 先進後出、棧尾操作的特性，也符合開始結束標籤的流程，beginWork/completeWork。
     - 指針保留最後一個的 `context._currentValue` 值，再遇到下個 context 時才會放入 stack。
-  - 更新 `context._currentValue` 成 props 上 value 的樣子。
-    - 可以確保 useContext 在調用 context 時會拿到最新的值。
-  - 彈出時，指針因為保留了上一個 context 的值，只要再還原給 context 就好，並且把指針指向到再上一個 context 值（也就是 stack[index])。
 
 比方說，兩個 context，使用三次
 
-```ts
-const CountContext = createContext(0);
-const ColorContext = createContext("red");
-```
+流程圖：
+![context 流程圖](./assets/context%20流程圖.png)
 
 ```tsx
+const CountContext = createContext(0);
+const ColorContext = createContext("red");
+
 function Comp() {
   const [count, setCount] = useReducer((x) => x + 1, 1);
 
@@ -4462,33 +4543,17 @@ function Comp() {
             >
               add
             </button>
-            <Child /> // A.
+            <Child />
           </CountContext.Provider>
         </ColorContext.Provider>
-        <Child /> // B.
+        <Child />
       </CountContext.Provider>
     </div>
   );
 }
 ```
 
-- beginWork 時，
-
-  - 指針目前指向 `null` ，存進 stack 當中，先紀錄上 valueStack：`[null]`，再更新指針指向-> `context._currentValue：0`。更新掛載在 fiber 上的 `context._currentValue`，設成 props 上的 value：1。
-  - 指針目前指向的上一次的值 0 ，存進 stack 當中，valueStack：`[null, 0]`，再更新指針指向-> `context._currentValue："red"`，更新掛載在 fiber 上的 `context._currentValue`，設成 props 上的 value："green"。
-  - 指針指向的上一次的值 "red" ，存進 stack 當中，valueStack：`[null, 0, "red"]`，再更新指針指向-> `context._currentValue ：1`，更新掛載在 fiber 上的 `context._currentValue`，設成 props 上的 value："2"。
-
-- 子元件使用時，`<Child />` 在呼叫時，`useContext` 讀到的 `context._currentValue` -> 2。
-
-- completeWork 時，
-
-  - `</CountContext.Provider>` 指針指向的是保留下來尚未更新 props 的 1，設定 currentValue 保存 1。更新指針指向上一個 stack 的保留值 - "red"。stack 對應位置設定成 `null`。`context._currentValue` 指向 currentValue - 1。
-  - `</ColorContext.Provider>` 指針指向的是保留下來尚未更新 props 的 "red"，設定 currentValue 保存 "red"。更新指針指向上一個 stack 的保留值 - "0"。stack 對應位置設定成 `null` 。`context._currentValue` 指向 currentValue - "red"。
-
-- 子元件使用時，`<Child />` 在呼叫時，useContext 讀到的 `context._currentValue` - 1。
-
-- completeWork 時，
-  - `</CountContext.Provider>` 指針指向的是保留下來尚未更新 props 的 0，設定 currentValue 保存 0。更新指針指向上一個 stack 的保留值 - null。stack 對應位置設定成 null。
+#### 開始寫 context
 
 ```ts
 export function beginWork(
@@ -4524,8 +4589,6 @@ function updateContextProvider(current: Fiber | null, workInProgress: Fiber) {
   return workInProgress.child;
 }
 ```
-
-**找到一個匹配的 context 就可以停止遍歷單鏈表了。**
 
 先處理紀錄 context
 
@@ -4596,6 +4659,8 @@ export function pop<T>(cursor: StackCursor<T>): void {
 
 ##### 補充源碼
 
+> react-debugger/src/react/packages/react-reconciler/src/ReactFiberBeginWork.js
+
 在源碼當中，會去判斷 value 有沒有發生變化，如果 children 也沒有變化，不需要再進行後面的 render 流程，直接 bailout，但如果 context value 發生改變，必須要搜索匹配的後代消費者並調度更新他們！
 
 後代消費者（函式組件、類組件、consumer 組件）會把 context 會存在 `workInProgress.dependencies.firstContext` 上，以鏈表的形式儲存(也有 next 和 memorizedValue 的屬性）。
@@ -4608,6 +4673,65 @@ export function pop<T>(cursor: StackCursor<T>): void {
 2. 判斷是 匹配的 Provider，就不需要繼續遍歷。因為 Provider 會再次走到 `updateContextProvider`。
 
 遍歷完子節點找兄弟節點，再遍歷父節點的兄弟節點。
+
+###### 為什麼 Provider props.value 發生改變後，需要主動去找消費者並發起調度？不能子消費者，在處理時，判斷 context 有沒有變化就好了嗎？
+
+因為單靠 `useContext`, `<Context.Consumer>` 這些機制並不足以滿足需求，原因如下：
+
+1. React 的樹狀結構需要全局視圖
+   - 在 React 的樹狀結構中，Context.Provider 的子節點可能是一個非常深的嵌套結構，甚至跨越不同的分支。
+   - 如果只依賴子節點內部通過 useContext 判斷值的改變，那麼 React 就無法確保所有的消費者都能正確被標記為需要更新。
+2. 優化更新
+   - React 需要通過比較 value（通常使用 Object.is）來避免不必要的更新。這種比較只能在 Provider 的層級進行，因為它擁有上下文的舊值和新值。
+   - 一旦發現值改變，React 會通過 Fiber 樹的連接關係快速標記需要更新的消費者，而不需要等待消費者自己檢測是否需要更新。
+3. 支持並發模式
+   - 在 Concurrent React（並發模式）中，React 的渲染和更新可能是非同步的。這意味著即使某些消費者被打斷，React 也需要保證所有受影響的消費者在適當的時間點被更新。
+   - 主動調度匹配的消費者更新，可以讓 React 更好地管理這些非同步渲染的場景。
+
+`updateContextProvider` 的調度邏輯是全局的，確保所有受影響的消費者（不管它們在哪一條分支上）都被標記為需要更新。
+`reconcileChildren` 則是局部的，它只處理當前子樹，並協調具體的更新過程。
+
+###### 消費者不必在 Provider 底下，也可以拿到 context 的預設值，只是為了解決跨層級傳遞的話，那這樣跟直接導入變數使用有什麼區別？
+
+```tsx
+const MyContext = createContext("default");
+
+function App() {
+  return (
+    <div>
+      <ChildOutside />
+      <MyContext.Provider value="provided">
+        <ChildInside />
+      </MyContext.Provider>
+    </div>
+  );
+}
+
+function ChildOutside() {
+  const value = useContext(MyContext);
+  return <div>Outside: {value}</div>;
+}
+
+function ChildInside() {
+  const value = useContext(MyContext);
+  return <div>Inside: {value}</div>;
+}
+
+// 渲染結果：
+// Outside: default
+// Inside: provided
+```
+
+React 應用中強調組件化和狀態管理的一致性。
+可解決：
+
+1. 如果某些組件需要默認值，而其他組件需要從 Provider 獲取動態值，直接導出變數無法滿足這一需求。
+2. 通過 useContext，消費者的設計模式是一致的，無論是否使用默認值。
+   組件可以完全抽象，不需要知道默認值是如何定義的。
+3. 如果變數和動態值需要手動切換，會增加使用的複雜度。默認值內置於 Context，組件可以自動獲取，而無需手動引入默認變數。
+4. 如果使用變數作為默認值，測試時需要手動模擬每種狀態。
+5. Context 是內置解決方案，能自然地與 React 的組件模型和渲染機制協作。
+   直接導出變數雖然可以用，但缺乏上下文感知，並且容易引入額外的組件耦合，這與 React 的設計理念不一致。
 
 ### Consumer
 
@@ -4763,6 +4887,47 @@ function Comp() {
     </div>
   );
 }
+```
+
+### 補充 context 優化：也可把 setter 和 getter 拆分
+
+```tsx
+import { createContext, useState, useContext } from "react";
+
+// 分別創建兩個 Context
+export const ItemsStateContext = createContext();
+export const ItemsDispatchContext = createContext();
+
+const ItemsProvider = ({ children }) => {
+  const [items, setItems] = useState(() => getInitialItems());
+
+  return (
+    <ItemsStateContext.Provider value={items}>
+      <ItemsDispatchContext.Provider value={setItems}>
+        {children}
+      </ItemsDispatchContext.Provider>
+    </ItemsStateContext.Provider>
+  );
+};
+
+export default ItemsProvider;
+
+// 自定義 hooks，方便使用
+export const useItems = () => {
+  const context = useContext(ItemsStateContext);
+  if (context === undefined) {
+    throw new Error("useItems must be used within an ItemsProvider");
+  }
+  return context;
+};
+
+export const useSetItems = () => {
+  const context = useContext(ItemsDispatchContext);
+  if (context === undefined) {
+    throw new Error("useSetItems must be used within an ItemsProvider");
+  }
+  return context;
+};
 ```
 
 ### Class Component context

@@ -25,7 +25,7 @@ const Child = () => {
     <div>
       <h1>{count}</h1>
       {/* 3-3. 後代組件消費 */}
-      <ColorContext.Consumer>
+      {/* <ColorContext.Consumer>
         {(theme) => (
           <div>
             {theme}
@@ -34,7 +34,7 @@ const Child = () => {
             </CountContext.Consumer>
           </div>
         )}
-      </ColorContext.Consumer>
+      </ColorContext.Consumer> */}
     </div>
   );
 };
@@ -47,35 +47,26 @@ class ClassChild extends Component {
 }
 
 function Comp() {
-  // const [count, setCount] = useReducer((x) => x + 1, 1);
-  const [text, setText] = useState("");
+  const [count, setCount] = useReducer((x) => x + 1, 1);
+  // const [text, setText] = useState("");
 
   return (
-    // 2. 創建 Provider 組件，對後代對象組件進行傳遞 value
     <div>
-      {/* <button
-        onClick={(e) => {
-          console.log("event---->", e);
-          setCount();
-        }}
-      >
-        add
-      </button> */}
-      {/*<CountContext.Provider value={count}>
-        <ClassChild />
-         <ColorContext.Provider value="green">
+      <CountContext.Provider value={count}>
+        <ColorContext.Provider value="green">
           <CountContext.Provider value={count + 1}>
+            <button
+              onClick={() => {
+                setCount();
+              }}
+            >
+              add
+            </button>
             <Child />
           </CountContext.Provider>
         </ColorContext.Provider>
-        <Child /> 
-      </CountContext.Provider>*/}
-      <input
-        type="text"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-      />
-      <p>{text}</p>
+        <Child />
+      </CountContext.Provider>
     </div>
   );
 }

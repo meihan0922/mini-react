@@ -32,7 +32,6 @@ function commitReconciliationEffects(finishedWork: Fiber) {
   // 頁面初次渲染，updateHostRoot 有走到 placeSingleChild，flags 有被打上 Placement
   // 新增插入位移都是 Placement
   if (flags & Placement) {
-    debugger;
     // 新增插入 appendChild
     commitPlacement(finishedWork);
     // 把 Placement 從 flags 移除
