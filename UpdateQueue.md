@@ -1,11 +1,4 @@
-- [ClassComponent 和 HostRoot 的 UpdateQueue](#classcomponent---hostroot---updatequeue)
-  - [updateQueue 的結構和初始化創建 - initializeUpdateQueue](#updatequeue-------------initializeupdatequeue)
-  - [創建 update - createUpdate](#---update---createupdate)
-  - [update 入隊](#update---)
-  - [管理 concurrentQueues 掛上 UpdateQueue - finishQueueingConcurrentUpdates](#---concurrentqueues----updatequeue---finishqueueingconcurrentupdates)
-  - [處理 UpdateQueue - processUpdateQueue](#---updatequeue---processupdatequeue)
-  - [總結](#--)
-  - [所以， setState 為什麼是異步的？](#----setstate---------)
+[TOC]
 
 # UpdateQueue
 

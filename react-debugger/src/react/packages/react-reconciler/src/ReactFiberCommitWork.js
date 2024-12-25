@@ -1715,7 +1715,7 @@ function isHostParent(fiber) {
 }
 
 function getHostSibling(fiber) {
-  debugger;
+  // debugger;
   // We're going to search forward into the tree until we find a sibling host
   // node. Unfortunately, if multiple insertions are done in a row we have to
   // search past them. This leads to exponential search for the next sibling.
@@ -2509,6 +2509,7 @@ function commitMutationEffectsOnFiber(finishedWork, root, lanes) {
         if (shouldProfile(finishedWork)) {
           try {
             startLayoutEffectTimer();
+            // ! useLayoutEffect 的
             commitHookEffectListUnmount(
               HookLayout | HookHasEffect,
               finishedWork,

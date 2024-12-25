@@ -1338,7 +1338,13 @@ function updateReducerImpl(hook, current, reducer) {
       // ! 有低優先級的更新任務，則next指向頭一個，變成單向循環鏈表
       newBaseQueueLast.next = newBaseQueueFirst;
     }
-
+    // debugger;
+    // console.log(
+    //   "%cmarkWorkInProgressReceivedUpdate",
+    //   "color: white; background-color: #007acc;",
+    //   newState,
+    //   hook.memoizedState
+    // );
     // Mark that the fiber performed work, but only if the new state is
     // different from the current state.
     // ! 如果 newState 和之前的不一樣，標記該 fiber 需要更新

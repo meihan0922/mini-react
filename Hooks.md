@@ -1,25 +1,4 @@
-- [hooks](#hooks)
-  - [renderWithHooks](#renderwithhooks)
-  - [型別](#--)
-  - [所有 hook 共同調用的函式](#---hook--------)
-    - [初始化 - mountWorkInProgressHook](#------mountworkinprogresshook)
-    - [更新 - updateWorkInProgressHook](#-----updateworkinprogresshook)
-  - [緩存 hooks - useCallback, useMemo](#---hooks---usecallback--usememo)
-    - [順便看 memo 源碼](#----memo---)
-  - [緩存 hooks - useRef](#---hooks---useref)
-    - [總結](#--)
-    - [另補充 forwardRef](#----forwardref)
-  - [狀態 hooks - useState, useReducer](#---hooks---usestate--usereducer)
-    - [疑問？觀念面試題](#--------)
-    - [useState 和 useReducer 比較](#usestate---usereducer---)
-      - [優先級問題](#-----)
-  - [effect hooks](#effect-hooks)
-    - [初始：建立 effect，加入 fiber.updateQueue 中，同時 effect 也會放入 hook.memoizedState](#------effect----fiberupdatequeue------effect------hookmemoizedstate)
-    - [更新：拿 deps 比對，根據情況加入到 effect 隊列中](#-----deps------------effect----)
-    - [commit 處理 updateQueue](#commit----updatequeue)
-      - [為什麼要判斷 rootWithPendingPassiveEffects](#-------rootwithpendingpassiveeffects)
-      - [flushPassiveEffects](#flushpassiveeffects)
-    - [重點整理](#----)
+[TOC]
 
 # hooks
 
@@ -771,26 +750,6 @@ function dispatchReducerAction(fiber, queue, action) {
 }
 ```
 
-流程圖
-
-```rust
-用戶事件 (onClick)
-   |
-修改 executionContext (DiscreteEventContext)
-   |
-執行回調 -> 呼叫 setState
-   |
-計算優先級 -> 拿到當前上下文中對應的優先級(getCurrentUpdatePriority)，創建 update，儲存在內存的陣列當中
-   |
-加入更新隊列 (hook.queue.pending 或 fiber.updateQueue.shared.pending)
-   |
-調度更新 (scheduleUpdateOnFiber)
-   |
-進入 render 階段 -> 應用更新
-   |
-完成 commit 階段 -> 更新 DOM
-```
-
 同步看下一樣式狀態更新的 `mountState`，
 
 ```ts
@@ -895,14 +854,24 @@ function dispatchSetState(fiber, queue, action) {
 }
 ```
 
-更新時，會執行 `dispatchReducerAction`
+更新時， 雖然 `setState` 也是走 `updateReducer` ，但前面的流程還是不一樣！ `reducer` 會執行 `dispatchReducerAction`，而 `setState` 在 `dispatchSetState` 有進行優化！
 
-1. 創建 update
-2. 把 update 入隊，暫存到 concurrentQueue array 中
-3. 調度更新，放到 hook.queue.pending 上面
-4. 執行更新
+`setState 狀態更新一致` 的流程圖
 
-流程圖
+```rust
+用戶事件 (onClick)
+   |
+修改 executionContext (DiscreteEventContext)
+   |
+執行回調 -> 呼叫 setState，dispatchSetState
+   |
+判斷狀態更新一樣，調度一個不會觸發重新渲染的更新
+enqueueConcurrentHookUpdateAndEagerlyBailout
+   |
+finishQueueingConcurrentUpdates 完成任務
+```
+
+`useReducer 更新` 或是 `setState 狀態更新不一致時` 的流程圖
 
 ```rust
 用戶事件 (例如 onClick)
@@ -934,6 +903,7 @@ function dispatchSetState(fiber, queue, action) {
    - 拼接到 `workInProgressHook` 的鏈表上，改變指針以讓下個 `hook` 正確連接。
    |
 **`updateReducerImpl`**：
+   - 如果 useState 的 setState 狀態不一樣，也會走到此！！
    - 合併 `pending` 隊列和之前的 `baseQueue`。
    - **優先處理 `pending` 隊列**（因為這是用戶最新的交互，可能優先級較高）。
    - 遍歷所有更新，判斷是否執行（根據優先級判定）。
@@ -962,6 +932,8 @@ function dispatchSetState(fiber, queue, action) {
 **最終完成更新並同步 DOM**
 
 ```
+
+**_ `useReducer` 不管更新的狀態是否一致，都會重新渲染組件！ _**
 
 > react-debugger/src/react/packages/react-reconciler/src/ReactFiberHooks.js
 
@@ -1287,7 +1259,76 @@ const [state, dispatch] = useReducer(
 
 而 `useReducer` 只能 `dispatch ( { type : 'someType' } );` 這樣更新。
 
-狀態上都有 `hook.memoizedState = hook.baseState = initialState;`，初始狀態被保存在 `hook.baseState`（基礎狀態，會合併 `hook.baseQueue` 的初始值）、`hook.memoizedState`（目前狀態） 當中
+狀態上都有 `hook.memoizedState = hook.baseState = initialState;`，初始狀態被保存在 `hook.baseState`（基礎狀態，會合併 `hook.baseQueue` 的初始值）、`hook.memoizedState`（目前狀態） 當中。
+
+另外注意！！！ `useReducer` 不管更新的狀態是否一致，都會重新渲染組件！
+
+再看一次流程圖
+
+`setState 狀態更新一致` 的流程圖
+
+```rust
+用戶事件 (onClick)
+   |
+修改 executionContext (DiscreteEventContext)
+   |
+執行回調 -> 呼叫 setState，dispatchSetState
+   |
+判斷狀態更新一樣，調度一個不會觸發重新渲染的更新
+enqueueConcurrentHookUpdateAndEagerlyBailout
+   |
+finishQueueingConcurrentUpdates 完成任務
+```
+
+`useReducer 更新` 或是 `setState 狀態更新不一致時` 的流程圖
+
+```rust
+用戶事件 (例如 onClick)
+   |
+**修改 executionContext** (設置成 `DiscreteEventContext`，標記當前正在處理離散事件)
+   |
+執行回調 -> 呼叫 `useReducer` 的狀態更新函數 -> 觸發 `dispatchReducerAction`
+   |
+**計算優先級**：通過 `getCurrentUpdatePriority` 獲取當前上下文的優先級。
+   |
+**創建 update**：使用當前狀態和新的 `action` 創建一個 `update` 對象，並調用 `enqueueUpdate`，將其入隊到內存中的隊列中。
+   |
+**`scheduleUpdateOnFiber`**：通知 React 有新的更新需要處理。
+   |
+**`finishQueueingConcurrentUpdates`**：將 `update` 從臨時內存隊列轉移到 `fiber` 的 `queue.pending`，並掛載到對應的 `fiber` 上。
+   |
+**render 階段開始**：
+   |
+**`beginWork`**：遞歸處理每個 `fiber` 節點，更新虛擬 DOM 樹。
+   |
+**`updateFunctionComponent`**：執行函數組件的更新邏輯。
+   |
+**`renderWithHooks`**：
+   - 再次執行函數組件，進行 `hooks` 的更新計算。
+   - 這會調用 `useReducer`，該函數內部調用 `updateReducer`，進一步執行狀態計算。
+   |
+**`updateWorkInProgressHook`**：
+   - 判斷是否可以復用之前的 `hook`。
+   - 拼接到 `workInProgressHook` 的鏈表上，改變指針以讓下個 `hook` 正確連接。
+   |
+**`updateReducerImpl`**：
+   - 如果 useState 的 setState 狀態不一樣，也會走到此！！
+   - 合併 `pending` 隊列和之前的 `baseQueue`。
+   - **優先處理 `pending` 隊列**（因為這是用戶最新的交互，可能優先級較高）。
+   - 遍歷所有更新，判斷是否執行（根據優先級判定）。
+   - 計算新的 `state`：
+     - 如果更新是函數類型（例如 `setCount((count) => count + 1)`），使用最新的 `state` 作為參數。
+     - 如果是一般值更新，直接使用該值。
+   - 如果有部分更新優先級不夠，保留鏈表，並將處理到一半的狀態記錄到 `baseState`。
+   |
+**再次調用 `finishQueueingConcurrentUpdates`**：如果本次更新生成了新的更新，將其入隊。
+   |
+**render 階段**：
+   |
+**commit 階段**：
+   |
+**最終完成更新並同步 DOM**
+```
 
 #### 優先級問題
 

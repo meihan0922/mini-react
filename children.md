@@ -1,3 +1,5 @@
+[TOC]
+
 # children
 
 > 原文：[The mystery of React Element, children, parents and re-renders

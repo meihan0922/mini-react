@@ -1,35 +1,4 @@
-- [scheduler 造輪子](#scheduler-造輪子)
-  - [scheduler 是做什麼的？](#scheduler-是做什麼的)
-    - [什麼是協作式調度?](#什麼是協作式調度)
-      - [協作式調度](#協作式調度)
-      - [搶佔式調度](#搶佔式調度)
-      - [轉換到瀏覽器](#轉換到瀏覽器)
-    - [控制權的轉讓](#控制權的轉讓)
-      - [為什麼不是微任務？](#為什麼不是微任務)
-      - [React 為什麼選擇使用 MessageChannel 來實現類似 requestIdleCallback 的功能，主要是因為以下幾個原因：](#react-為什麼選擇使用-messagechannel-來實現類似-requestidlecallback-的功能主要是因為以下幾個原因)
-        - [為什麼不能用 setTimeout 來代替 MessageChannel？不是都是呼叫執行宏任務嗎？](#為什麼不能用-settimeout-來代替-messagechannel不是都是呼叫執行宏任務嗎)
-        - [window.requestAnimationFrame \& window.requestIdleCallback](#windowrequestanimationframe--windowrequestidlecallback)
-    - [如何避免餓死現象?](#如何避免餓死現象)
-      - [time slicing](#time-slicing)
-      - [aging](#aging)
-  - [造輪子步驟](#造輪子步驟)
-    - [三把鎖的意義 - 避免重複調度](#三把鎖的意義---避免重複調度)
-    - [1. 建立任務型別](#1-建立任務型別)
-    - [2. 建立變數](#2-建立變數)
-    - [scheduleCallback](#schedulecallback)
-    - [requestHostCallback](#requesthostcallback)
-    - [schedulePerformWorkUntilDeadline](#scheduleperformworkuntildeadline)
-    - [performWorkUntilDeadline](#performworkuntildeadline)
-    - [建立取消正在執行的任務堆的某任務函式 \& export](#建立取消正在執行的任務堆的某任務函式--export)
-    - [建立取得當前正在執行的任務的優先等級函式 \& export](#建立取得當前正在執行的任務的優先等級函式--export)
-    - [是否要終止任務，把控制權交給主線程函式 \& export](#是否要終止任務把控制權交給主線程函式--export)
-  - [調度延遲任務](#調度延遲任務)
-    - [延時任務轉普通任務的時機?](#延時任務轉普通任務的時機)
-    - [`scheduleCallback` 加入延遲任務參數](#schedulecallback-加入延遲任務參數)
-    - [建立計時器](#建立計時器)
-    - [handleTimeout 時間到的 callback，調用 advanceTimers](#handletimeout-時間到的-callback調用-advancetimers)
-  - [實現真正的 time slicing](#實現真正的-time-slicing)
-  - [學習資料](#學習資料)
+[TOC]
 
 # scheduler 造輪子
 
@@ -98,7 +67,7 @@ react 按照使用者的瀏覽器支援度，選擇使用其中一種非同步 a
 
 微任務會緊接著在另一個微任務中執行，如果其中執行完後又呼叫微任務，event loop 的 call stack 一直被佔用。宏任務才可以實現控制權的轉讓。
 
-#### React 為什麼選擇使用 MessageChannel 來實現類似 requestIdleCallback 的功能，主要是因為以下幾個原因：
+#### React 為什麼選擇使用 MessageChannel 來實現類似 requestIdleCallback 的功能？
 
 1. <u>兼容性和一致性</u>：
    requestIdleCallback 在所有瀏覽器中的支持情況不一樣，特別是在一些舊版瀏覽器或不支持這個 API 的環境下，React 希望能在不同的環境中保持一致的行為。使用 MessageChannel 可以提供更一致的跨瀏覽器行為。
