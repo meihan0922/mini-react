@@ -2341,7 +2341,7 @@ export function completeWork(
 ## Hooks
 
 - 規則：官網說不能在循換、條件或是嵌套中調用，要確保在 react 函式最頂層以及任何 return 前調用他們。
-  - 🌟 是為什麼呢？ 因為在 hook 存在在 `fiber.memorized` 中，**單鏈表**的每個 hook 節點是沒有名字或是 key 的，除了他們的順序，_無法記錄他們的唯一性_，為了保持穩定性，才有這些規則。
+  - 🌟 是為什麼呢？ 因為在 hook 存在在 `fiber.memoizedState` 中，**單鏈表**的每個 hook 節點是沒有名字或是 key 的，除了他們的順序，_無法記錄他們的唯一性_，為了保持穩定性，才有這些規則。
 - 類型：
 
   ```ts
@@ -2366,7 +2366,7 @@ export function completeWork(
     // 不同類型的 hook，存的內容不同
     // useState / useReducer 存 state，
     // useEffect / useLayoutEffect 存 effect 單向循環鏈表
-    memorizedState: any;
+    memoizedState: any;
 
     // 下一個 hook，如果是 null，表示他是最後一個 hook
     next: Hook | null;
@@ -2404,7 +2404,7 @@ export function completeWork(
 
 - 存儲：
   就像是 fiber，會有一個指針指向正在工作中的 hook - `workInProgressHook`
-  fiber.memorizedState(hook0) --next--> next(hook1) --next--> .... -> next(hookN)
+  fiber.memoizedState(hook0) --next--> next(hook1) --next--> .... -> next(hookN)
 
   ```tsx
   let workInProgressHook = null;
@@ -2484,7 +2484,7 @@ function finalizeInitialChildren(domElement: Element, props: any) {
 
 ```ts
 type Hook = {
-  memorizedState: any;
+  memoizedState: any;
   next: null | Hook;
 };
 
@@ -2495,7 +2495,7 @@ export function useReducer<S, I, A>(
 ) {
   // TODO: 構建Hook鏈表
   const hook: Hook = {
-    memorizedState: null,
+    memoizedState: null,
     next: null,
   };
   let initialState: S;
@@ -2511,7 +2511,7 @@ export function useReducer<S, I, A>(
   };
 
   // TODO: 要區分初次掛載還是更新，暫時寫這樣
-  hook.memorizedState = initialArg;
+  hook.memoizedState = initialArg;
 
   return [initialArg, dispatch];
 }
@@ -2600,7 +2600,7 @@ export function finishRenderingHooks() {
 
 ```ts
 type Hook = {
-  memorizedState: any;
+  memoizedState: any;
   next: null | Hook;
 };
 
@@ -2630,7 +2630,7 @@ function updateWorkInProgressHook(): Hook {
     // mount 階段
     currentHook = null;
     hook = {
-      memorizedState: null,
+      memoizedState: null,
       next: null,
     };
     if (workInProgressHook) {
@@ -2649,7 +2649,7 @@ export function useReducer<S, I, A>(
 ) {
   // TODO: 構建Hook鏈表
   // const hook: Hook = {
-  //   memorizedState: null,
+  //   memoizedState: null,
   //   next: null,
   // };
   const hook: Hook = updateWorkInProgressHook();
@@ -2658,12 +2658,12 @@ export function useReducer<S, I, A>(
   // 初次掛載還是更新
   // mount階段，初次渲染
   if (!currentlyRenderingFiber?.alternate) {
-    hook.memorizedState = initialState;
+    hook.memoizedState = initialState;
   }
 }
 ```
 
-##### dispatch 事件，修改 hook.memorizedState
+##### dispatch 事件，修改 hook.memoizedState
 
 > react-reconciler/src/ReactFiberHooks.ts
 
@@ -2683,7 +2683,7 @@ export function useReducer<S, I, A>(
     reducer as any
   );
 
-  return [hook.memorizedState, dispatch];
+  return [hook.memoizedState, dispatch];
 }
 
 function dispatchReducerAction<S, I, A>(
@@ -2692,7 +2692,7 @@ function dispatchReducerAction<S, I, A>(
   reducer?: (state: S, action: A) => S,
   action?: any
 ) {
-  hook.memorizedState = reducer ? reducer(hook.memorizedState, action) : action;
+  hook.memoizedState = reducer ? reducer(hook.memoizedState, action) : action;
 
   // 找到 HostRoot
   const root = getRootForUpdateFiber(fiber);
@@ -3686,7 +3686,7 @@ export function useMemo<T>(
 ): T {
   const hook: Hook = updateWorkInProgressHook();
   const nextDeps = deps === undefined ? null : deps;
-  const prevState = hook.memorizedState;
+  const prevState = hook.memoizedState;
   if (prevState !== null) {
     if (nextDeps !== null) {
       const prevDeps = prevState[1];
@@ -3697,7 +3697,7 @@ export function useMemo<T>(
     }
   }
   const nextVal = nextCreate();
-  hook.memorizedState = [nextVal, nextDeps];
+  hook.memoizedState = [nextVal, nextDeps];
   return nextVal;
 }
 // 檢查 hook deps 是否發生變化
@@ -3810,7 +3810,7 @@ export function useCallback<T extends Function>(
 ): T {
   const hook: Hook = updateWorkInProgressHook();
   const nextDeps = deps === undefined ? null : deps;
-  const prevState = hook.memorizedState;
+  const prevState = hook.memoizedState;
   if (prevState !== null) {
     if (nextDeps !== null) {
       const prevDeps = prevState[1];
@@ -3820,7 +3820,7 @@ export function useCallback<T extends Function>(
       }
     }
   }
-  hook.memorizedState = [callback, nextDeps];
+  hook.memoizedState = [callback, nextDeps];
 
   return callback;
 }
@@ -3852,9 +3852,9 @@ export function useRef<T>(data: T): { current: T } {
   const hook: Hook = updateWorkInProgressHook();
   // 初次掛載
   if (currentHook === null) {
-    hook.memorizedState = { current: data };
+    hook.memoizedState = { current: data };
   }
-  return hook.memorizedState;
+  return hook.memoizedState;
 }
 ```
 
@@ -3943,7 +3943,7 @@ export const HookLayout = /*    */ 0b0100;
 export const HookPassive = /*   */ 0b1000;
 ```
 
-fiber.updateQueue 結構和 class Component 不一樣，（另外“狀態 hooks” 是儲存在 fiber.memorized，那在 hook 結構上也有叫做 updateQueue 的變數，是不同的 他儲存在 hooks 的 queue 上），結構是長這樣：
+effect update 結構和 class Component 產生的 update 不一樣，雖然都會掛載在 fiber.updateQueue 上（另外“狀態 hooks” 還有儲存在 hooks 鏈表的 hook 上（fiber.memoizedState.memoizedState）
 
 ```ts
 export type FunctionComponentUpdateQueue = {|
@@ -3961,7 +3961,7 @@ export const Update = /*                       */ 0b0000000000000000000000000100
 export const Passive = /*                      */ 0b0000000000000000100000000000; // 2048
 ```
 
-依賴項會掛載在 memorizedState。處理是否有更新就和上面 useCallback 相同。call `areHookInputEqual。`
+依賴項會掛載在 memoizedState 。處理是否有更新就和上面 useCallback 相同。call `areHookInputEqual。`
 
 #### 初始化 updateQueue、建立 effect 鏈表
 
@@ -4015,7 +4015,7 @@ function updateEffectImpl(
   if (currentHook !== null) {
     if (nextDeps !== null) {
       // ! 依賴項是否有改變
-      const prevDeps = currentHook.memorizedState.deps;
+      const prevDeps = currentHook.memoizedState.deps;
       if (areHookInputEqual(nextDeps, prevDeps)) {
         return;
       }
@@ -4024,11 +4024,11 @@ function updateEffectImpl(
 
   // ! 打上 tag
   currentlyRenderingFiber!.flags |= fibrFlags;
-  // ! 注意 hook.memorizedState 依照不同類型的 hook，存的內容不同
+  // ! 注意 hook.memoizedState 依照不同類型的 hook，存的內容不同
   // useEffect / useLayoutEffect 存 effect 單向循環鏈表，指向最後一個 effect
   // 1. 保存 Effect
   // 2. 構建 effect 鏈表
-  hook.memorizedState = pushEffect(hookFlags, create, deps);
+  hook.memoizedState = pushEffect(hookFlags, create, deps);
 }
 
 function pushEffect(
@@ -6986,7 +6986,7 @@ let renderLanes: Lanes = NoLanes;
 // 只是當前沒有實現
 export function useDeferredValue<T>(value: T): T {
   const hook = updateWorkInProgressHook();
-  const prevValue: T = hook.memorizedState;
+  const prevValue: T = hook.memoizedState;
 
   if (currentHook !== null) {
     // 更新階段
@@ -7009,12 +7009,12 @@ export function useDeferredValue<T>(value: T): T {
         return prevValue;
       } else {
         // 只包含非緊急更新，沒有其他緊急的更新了，這個時候執行這個非緊急更新就好
-        hook.memorizedState = value;
+        hook.memoizedState = value;
         return value;
       }
     }
   }
-  hook.memorizedState = value;
+  hook.memoizedState = value;
   return value;
 }
 ```

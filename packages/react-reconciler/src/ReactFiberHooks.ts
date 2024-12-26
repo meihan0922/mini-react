@@ -18,7 +18,7 @@ import {
 } from "./ReactFiberLane";
 
 type Hook = {
-  memorizedState: any;
+  memoizedState: any;
   next: null | Hook;
 };
 type Effect = {
@@ -79,7 +79,7 @@ function updateWorkInProgressHook(): Hook {
     // 初次渲染 mount
     currentHook = null;
     hook = {
-      memorizedState: null,
+      memoizedState: null,
       next: null,
     };
     if (workInProgressHook) {
@@ -110,7 +110,7 @@ export function useReducer<S, I, A>(
   // 初次掛載還是更新
   // mount階段，初次渲染，才需要發送初始值
   if (!currentlyRenderingFiber?.alternate) {
-    hook.memorizedState = initialState;
+    hook.memoizedState = initialState;
   }
 
   // TODO: 構建dispatch
@@ -122,7 +122,7 @@ export function useReducer<S, I, A>(
     reducer as any
   );
 
-  return [hook.memorizedState, dispatch];
+  return [hook.memoizedState, dispatch];
 }
 
 // 源碼當中，useState 和 useReducer 對比
@@ -142,7 +142,7 @@ function dispatchReducerAction<S, I, A>(
   reducer?: (state: S, action: A) => S,
   action?: any
 ) {
-  hook.memorizedState = reducer ? reducer(hook.memorizedState, action) : action;
+  hook.memoizedState = reducer ? reducer(hook.memoizedState, action) : action;
   // fiber.alternate = { ...fiber };
   const root = getRootForUpdateFiber(fiber);
   scheduleUpdateOnFiber(root, fiber);
@@ -164,7 +164,7 @@ export function useMemo<T>(
 ): T {
   const hook: Hook = updateWorkInProgressHook();
   const nextDeps = deps === undefined ? null : deps;
-  const prevState = hook.memorizedState;
+  const prevState = hook.memoizedState;
   if (prevState !== null) {
     if (nextDeps !== null) {
       const prevDeps = prevState[1];
@@ -175,7 +175,7 @@ export function useMemo<T>(
     }
   }
   const nextVal = nextCreate();
-  hook.memorizedState = [nextVal, nextDeps];
+  hook.memoizedState = [nextVal, nextDeps];
   return nextVal;
 }
 
@@ -199,7 +199,7 @@ export function useCallback<T extends Function>(
 ): T {
   const hook: Hook = updateWorkInProgressHook();
   const nextDeps = deps === undefined ? null : deps;
-  const prevState = hook.memorizedState;
+  const prevState = hook.memoizedState;
   if (prevState !== null) {
     if (nextDeps !== null) {
       const prevDeps = prevState[1];
@@ -209,7 +209,7 @@ export function useCallback<T extends Function>(
       }
     }
   }
-  hook.memorizedState = [callback, nextDeps];
+  hook.memoizedState = [callback, nextDeps];
 
   return callback;
 }
@@ -218,9 +218,9 @@ export function useRef<T>(data: T): { current: T } {
   const hook: Hook = updateWorkInProgressHook();
   // 初次掛載
   if (currentHook === null) {
-    hook.memorizedState = { current: data };
+    hook.memoizedState = { current: data };
   }
-  return hook.memorizedState;
+  return hook.memoizedState;
 }
 
 // 和useEffect存儲的結構一樣
@@ -251,7 +251,7 @@ function updateEffectImpl(
   // 組件是否在更新階段
   if (currentHook !== null) {
     if (nextDeps !== null) {
-      const prevDeps = currentHook.memorizedState.deps;
+      const prevDeps = currentHook.memoizedState.deps;
       if (areHookInputEqual(nextDeps, prevDeps)) {
         return;
       }
@@ -261,7 +261,7 @@ function updateEffectImpl(
   currentlyRenderingFiber!.flags |= fibrFlags;
   // 1. 保存 Effect
   // 2. 構建 effect 鏈表
-  hook.memorizedState = pushEffect(hookFlags, create, deps);
+  hook.memoizedState = pushEffect(hookFlags, create, deps);
 }
 
 function pushEffect(
@@ -305,7 +305,7 @@ export function useContext(context: any) {
 
 export function useDeferredValue<T>(value: T): T {
   const hook = updateWorkInProgressHook();
-  const prevValue: T = hook.memorizedState;
+  const prevValue: T = hook.memoizedState;
 
   if (currentHook !== null) {
     // 更新階段
@@ -328,11 +328,11 @@ export function useDeferredValue<T>(value: T): T {
         return prevValue;
       } else {
         // 只包含非緊急更新，沒有其他緊急的更新了，這個時候執行這個非緊急更新就好
-        hook.memorizedState = value;
+        hook.memoizedState = value;
         return value;
       }
     }
   }
-  hook.memorizedState = value;
+  hook.memoizedState = value;
   return value;
 }

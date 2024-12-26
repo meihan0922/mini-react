@@ -2593,7 +2593,7 @@ function dispatchReducerAction(fiber, queue, action) {
     // ! 把 update 暫存到 concurrentQueue array 中，
     const root = enqueueConcurrentHookUpdate(fiber, queue, update, lane);
     if (root !== null) {
-      // ! 調度更新，之後 finishQueueingConcurrentUpdates，會把 concurrentQueues 的內容添加到 fiber.memorizedState 的 hook 的 queue.pending 上
+      // ! 調度更新，之後 finishQueueingConcurrentUpdates，會把 concurrentQueues 的內容添加到 fiber.memoizedState 的 hook 的 queue.pending 上
       scheduleUpdateOnFiber(root, fiber, lane);
       entangleTransitionUpdate(root, queue, lane);
     }

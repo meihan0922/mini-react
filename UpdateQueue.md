@@ -2,7 +2,7 @@
 
 # UpdateQueue
 
-react 在 class 組件中，節點狀態儲存在 `fiber.memorizedState` 上，老節點到新節點的更新儲存在 `fiber.updateQueue` 上。不同類型節點對應的 `updateQueue` 儲存的內容格式不同。
+react 在 class 組件中，節點狀態儲存在 `fiber.memoizedState` 上，老節點到新節點的更新儲存在 `fiber.updateQueue` 上。不同類型節點對應的 `updateQueue` 儲存的內容格式不同。
 
 - class 組件處理 state 更新，和 hostRoot 處理 render
 

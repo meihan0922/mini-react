@@ -222,7 +222,7 @@ const HooksDispatcherOnUpdate: Dispatcher = {
     // 不同類型的 hook，存的內容不同
     // useState / useReducer 存 state，
     // useEffect / useLayoutEffect 存 effect 單向循環鏈表，指向最後一個 effect
-    memorizedState: any;
+    memoizedState: any;
 
     // 下一個 hook，如果是 null，表示他是最後一個 hook
     next: Hook | null;
@@ -246,7 +246,7 @@ const HooksDispatcherOnUpdate: Dispatcher = {
   };
 ```
 
-注意：`狀態 hooks` 使用 fiber.memorizedState 內儲存的狀態 hook 自己的 queue 和 baseState、baseQueue，但 `effect hooks` 用 hook.memorizedState 儲存 effect 單向循環鏈表，還有使用 fiber.updateQueue， 在儲存內部的函式和依賴項。
+注意：`狀態 hooks` 使用 fiber.memoizedState 內儲存的狀態 hook 自己的 queue 和 baseState、baseQueue，但 `effect hooks` 用 hook.memoizedState 儲存 effect 單向循環鏈表，還有使用 fiber.updateQueue， 在儲存內部的函式和依賴項。
 
 ## 所有 hook 共同調用的函式
 
@@ -740,7 +740,7 @@ function dispatchReducerAction(fiber, queue, action) {
     // ! 把 update 暫存到 concurrentQueues 陣列當中，
     const root = enqueueConcurrentHookUpdate(fiber, queue, update, lane);
     if (root !== null) {
-      // ! 調度更新，之後 finishQueueingConcurrentUpdates，會把 concurrentQueues 的內容添加到 fiber.memorizedState 的 hook 的 queue.pending 上
+      // ! 調度更新，之後 finishQueueingConcurrentUpdates，會把 concurrentQueues 的內容添加到 fiber.memoizedState 的 hook 的 queue.pending 上
       scheduleUpdateOnFiber(root, fiber, lane);
       entangleTransitionUpdate(root, queue, lane);
     }
@@ -1333,10 +1333,10 @@ finishQueueingConcurrentUpdates 完成任務
 #### 優先級問題
 
 如果現在有優先級較低的 update3, update4，優先級較高的 update1, update2
-並且在 fiber.memorized.baseQueue 上的鏈表是 update1 -> update3 -> update4 -> update2，會先處理高優先級，變成 2，之後合併渲染成 4。
+並且在 fiber.memoizedState.baseQueue 上的鏈表是 update1 -> update3 -> update4 -> update2，會先處理高優先級，變成 2，之後合併渲染成 4。
 最終結果等於 update 鏈表**按順序合併**。
 
-另外，`baseState` 是 commit `的結果，memoizedState` 是最後一次渲染計算的狀態結果。
+另外，`baseState` 是 commit 的結果，`memoizedState` 是最後一次渲染計算的狀態結果。
 確保在高優先級打斷當前渲染時，可以回退到一個穩定的狀態，比方說：
 
 ```ts
@@ -1410,7 +1410,7 @@ function mountEffectImpl(fiberFlags, hookFlags, create, deps) {
     // 不同類型的 hook，存的內容不同
     // useState / useReducer 存 state，
     // useEffect / useLayoutEffect 存 effect 單向循環鏈表，指向最後一個 effect
-    memorizedState: any;
+    memoizedState: any;
 
     // 下一個 hook，如果是 null，表示他是最後一個 hook
     next: Hook | null;
