@@ -1489,6 +1489,68 @@ function isHostParent(fiber: Fiber) {
 
 透過分離內存操作和真實 DOM 操作，實現了高效的更新機制。
 
+## 補充 協調 DIFF 的流程圖
+
+比較兩個鏈表，不能用嵌套的兩層循環，成本太高(O(n²))，特殊處理！
+大多數情況都是局部更新，不太會調動順序。
+
+> 刪除不是真的都刪了，是在父節點標記子節點刪除，推入父節點 `returnFiber.deletions`
+> Fragment 需要特殊處理 Children
+
+```mermaid
+---
+title: 新節點是單個文本節點
+---
+graph TD
+    B[單個文本節點];
+    B --> B1[1.協調];
+    B1 --> B1-1[第一個老節點也是文本節點];
+    B1-1 --> B1-1-1[1.把剩餘老節點全部刪除]
+    B1-1 --> B1-1-2[2.復用＆更新內容並回傳]
+    B --> B2[2.如果是更新階段，而且沒得復用，則標記為新增，flag - Placement]
+    B1 --> B1-2[老節點不是文本節點];
+    B1-2 --> B1-2-1[1.把老節點全部刪除];
+    B1-2 --> B1-2-2[2.創建文本節點，返回新節點];
+```
+
+---
+
+```mermaid
+---
+title: 新節點是單個節點
+---
+graph TD
+    C[單個節點];
+    C --> C1[1.協調];
+    C --> C2[2.更新階段＆沒得復用，則標記為新增，flag - Placement];
+    C1 --> C1-1[1.循環遍歷老節點，比較 key 和 type，過程中];
+    C1-1 --> C1-1-1[如果 key 相同，檢查型別]
+    C1-1-1 --> C1-1-1-1[新老節點是 Fragment，刪除剩餘節點，復用此節點並返回]
+    C1-1-1 --> C1-1-1-2[新老節都不是 Fragment]
+    C1-1-1-2 --> C1-1-1-2-1[新老節類型相同，刪除剩餘節點，復用此節點並返回]
+    C1-1-1-2 --> C1-1-1-2-2[新老節類型不同，刪除剩餘節點，終止循環]
+    C1-1 --> C1-1-2[如果老節點的 key 不相同，刪除此節點]
+    C1 --> C1-2[2.上一步循環遍歷結束，卻沒有執行 return，表示無可復用的];
+    C1-2 --> C1-2-1[新老節點是 Fragment，創建];
+    C1-2 --> C1-2-2[創建普通節點並返回];
+```
+
+---
+
+```mermaid
+---
+title: 新節點是陣列
+---
+graph TD
+    D[陣列];
+    D --> D1["1.從左邊向右遍歷，比較新老節點，如果可以復用就繼續((O(n))，不然就停止"];
+    D --> D2[2.新節點沒了，但老節點還有，則刪除剩餘老節點，退出];
+    D --> D3[3.新節點還有，老節點沒了（初次渲染階段或更新階段，剩餘節點創建後，退出]
+    D --> D4[4.新老節點都還有，把老節點做成 Map]
+    D4 --> D4-1["比對 Map，找到就復用且刪除 Map 對應(O(1))，否則創建"]
+    D --> D5[5.新節點都已經遍歷完成，把 Map 剩下的刪除]
+```
+
 ## 補充各種節點渲染
 
 ### 文本節點
@@ -3905,6 +3967,8 @@ const useInterval = (
 
 從 react 純函式中通往命令式的逃生通道。會在渲染之後**延遲**執行。 專門針對副作用的操作，比方改變 DOM、添加訂閱、計時器設置、紀錄日誌等等。
 
+所謂延遲是指在任務調度的內部，把 effect 執行任務與當前的 commit 渲染任務分開，不使用同個任務，就不會阻塞 ui 的更新。
+
 ```tsx
 const [count, setCount] = useReducer((x) => x + 1, 0);
 useEffect(() => {
@@ -4442,6 +4506,7 @@ export function createFiberFromTypeAndProps(
 
 流程圖：
 ![context 流程圖](./assets/context%20流程圖.png)
+![context](./assets/context.png)
 
 ```tsx
 const CountContext = createContext(0);
@@ -4540,6 +4605,7 @@ export function popProvider<T>(context: ReactContext<T>): void {
 
 // 後代組件消費
 export function readContext<T>(context: ReactContext<T>) {
+  // 這邊有省略源碼
   return context._currentValue;
 }
 ```
@@ -4581,9 +4647,60 @@ export function pop<T>(cursor: StackCursor<T>): void {
 
 > react-debugger/src/react/packages/react-reconciler/src/ReactFiberBeginWork.js
 
-在源碼當中，會去判斷 value 有沒有發生變化，如果 children 也沒有變化，不需要再進行後面的 render 流程，直接 bailout，但如果 context value 發生改變，必須要搜索匹配的後代消費者並調度更新他們！
+在源碼當中，會去判斷 value 有沒有發生變化(`checkScheduledUpdateOrContext` -> `checkIfContextChanged`)，不需要再進行後面的 render 流程，直接 bailout，但如果 context value 發生改變，必須要搜索匹配的後代消費者並調度更新他們！
 
-後代消費者（函式組件、類組件、consumer 組件）會把 context 會存在 `workInProgress.dependencies.firstContext` 上，以鏈表的形式儲存(也有 next 和 memorizedValue 的屬性）。
+後代消費者（函式組件、類組件、consumer 組件）會把 context 會存在 `workInProgress.dependencies.firstContext` 上，以“鏈表”的形式儲存(也有 next 和 memorizedValue 的屬性）。
+
+- 為什麼要這麼做？單純用 stack 和 cursor 不是已經可以找到最近的 Provider 了嗎？
+  1. 持久的保存，而不是僅限於渲染階段使用，stack 每次渲染完成都會被清空！
+  2. 可能會在渲染過程中被中斷，需要保存並恢復
+  3. 如果動態插入新的 Consumer 或 Provider，鏈表可以直接更新對應的依賴關係！
+  4. 可以幫助 react 找到依賴關係，只更新局部組件
+
+```ts
+function readContextForConsumer(consumer, context) {
+  const value = isPrimaryRenderer
+    ? context._currentValue
+    : context._currentValue2;
+
+  if (lastFullyObservedContext === context) {
+    // Nothing to do. We already observe everything in this context.
+  } else {
+    const contextItem = {
+      context: context,
+      memoizedValue: value,
+      next: null,
+    };
+
+    if (lastContextDependency === null) {
+      if (consumer === null) {
+        throw new Error(
+          "Context can only be read while React is rendering. " +
+            "In classes, you can read it in the render method or getDerivedStateFromProps. " +
+            "In function components, you can read it directly in the function body, but not " +
+            "inside Hooks like useReducer() or useMemo()."
+        );
+      }
+
+      // This is the first dependency for this component. Create a new list.
+      lastContextDependency = contextItem;
+      // ! 儲存 context
+      consumer.dependencies = {
+        lanes: NoLanes,
+        firstContext: contextItem,
+      };
+      if (enableLazyContextPropagation) {
+        consumer.flags |= NeedsPropagation;
+      }
+    } else {
+      // Append a new context item.
+      // ! 以 next 儲存下一個 context
+      lastContextDependency = lastContextDependency.next = contextItem;
+    }
+  }
+  return value;
+}
+```
 
 後代消費者在 beginWork 時，會調用 `prepareToReadContext` 如果有 context 了就標記更新，不然就初始化鏈表 設成空。
 `readContextForConsumer` 讀取 context 時，建立鏈表，或是已經有頭節點就銜接到 next 上。（源碼中，流程跟思路跟 hook 構建有點像）。
