@@ -198,6 +198,16 @@ useEffect 是延遲執行。
 比如 用函式組件實現 antd 4/5 form field，rc-field-form 是用類組件實現的，換成函式組件實現
 ssr
 
+## 優化篇
+
+### 如何減少組件的重新渲染？
+
+就是讓子組件可以走 bailout，
+
+- 保證 key 值唯一性、層級、型別保持一致，才會走入 bailout。
+- `memo` `useMemo` `useCallback` 優化外，如果有使用 `context` 要另外封裝，以 `props.children` 包住子組件。
+- 在使用狀態時，如果是基本類型，盡量使用 `useState` 避開， `useReducer`，因為內部有優化 dispatchSetState 會比對狀態變更才觸發 scheduleUpdateOnFiber。
+
 ## DIFF 算法
 
 比較兩個鏈表，不能用嵌套的兩層循環，成本太高(O(n²))，特殊處理！

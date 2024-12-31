@@ -1350,6 +1350,8 @@ setState(3); // 低優先級
 2. 換低優先級處理時，重新計算所有低優先級更新，memoizedState(3)
 3. 所有更新完成，baseState(3)
 
+如果是渲染中被打斷，會去判斷相關狀態或是 props 或是上下文環境是否發生改變，看是否要遺棄任務。如果優先級過低且已經過期也可能會遺棄任務。
+
 ## effect hooks
 
 可作為 `componentDidMount` `componentDidUpdate` `componentWillUnmount` 這三個生命週期函數的組合。但他們只是類似。實際是不完全相同。`componentDidMount` 和 `useLayoutEffect` 理論上才是一致的。
