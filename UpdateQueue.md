@@ -1,4 +1,11 @@
-[TOC]
+- [UpdateQueue](#updatequeue)
+  - [updateQueue 的結構和初始化創建 - initializeUpdateQueue](#updatequeue-的結構和初始化創建---initializeupdatequeue)
+  - [創建 update - createUpdate](#創建-update---createupdate)
+  - [update 入隊 (hook 和 class 組件都會走到此)](#update-入隊-hook-和-class-組件都會走到此)
+  - [管理 concurrentQueues 掛上 UpdateQueue - finishQueueingConcurrentUpdates (hook 和 class 組件都會走到此)](#管理-concurrentqueues-掛上-updatequeue---finishqueueingconcurrentupdates-hook-和-class-組件都會走到此)
+  - [處理 UpdateQueue - class 組件 processUpdateQueue( hook 走 finishQueueingConcurrentUpdates)](#處理-updatequeue---class-組件-processupdatequeue-hook-走-finishqueueingconcurrentupdates)
+  - [總結](#總結)
+  - [所以， setState 為什麼是異步的？](#所以-setstate-為什麼是異步的)
 
 # UpdateQueue
 

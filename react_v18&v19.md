@@ -1,4 +1,23 @@
-[TOC]
+- [React 18](#react-18)
+  - [🌟 新特性](#-新特性)
+    - [正式支持 Concurrent 併發](#正式支持-concurrent-併發)
+    - [react-dom/client 中的 createRoot 取代以前的 ReactDOM.render?](#react-domclient-中的-createroot-取代以前的-reactdomrender)
+    - [自動批量處理，setState 是同步還是異步？](#自動批量處理setstate-是同步還是異步)
+    - [Suspense](#suspense)
+      - [為什麼我們需要 Suspense？](#為什麼我們需要-suspense)
+      - [搭配 transition](#搭配-transition)
+      - [如何實現錯誤處理邊界？](#如何實現錯誤處理邊界)
+    - [transition](#transition)
+      - [startTransition](#starttransition)
+      - [useTransition](#usetransition)
+      - [react 不會將 await 之後的狀態更新視為 Transition](#react-不會將-await-之後的狀態更新視為-transition)
+        - [❌ 不應將異步的 api 包進 transition](#-不應將異步的-api-包進-transition)
+    - [useDeferredValue](#usedeferredvalue)
+      - [和防抖節流有什麼不同？](#和防抖節流有什麼不同)
+    - [useId](#useid)
+    - [library hooks](#library-hooks)
+      - [useSyncExternalStore(subscribe, getSnapshot,getServerSnapshot?): store Snapshot](#usesyncexternalstoresubscribe-getsnapshotgetserversnapshot-store-snapshot)
+      - [useInsertionEffect - CSS-in-JS](#useinsertioneffect---css-in-js)
 
 # React 18
 

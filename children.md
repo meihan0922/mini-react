@@ -1,4 +1,10 @@
-[TOC]
+- [children](#children)
+  - [問題一：為什麼以 {props.children} 傳入父組件就不會重新渲染了？](#問題一為什麼以-propschildren-傳入父組件就不會重新渲染了)
+  - [問題二：如果以 {children()} 作為子組件呼叫，又會重新渲染，是怎麼回事？](#問題二如果以-children-作為子組件呼叫又會重新渲染是怎麼回事)
+  - [問題三：使用 useCallback 包住子組件呼叫，還是會重新渲染](#問題三使用-usecallback-包住子組件呼叫還是會重新渲染)
+  - [composition：context 就可以做類似的優化](#compositioncontext-就可以做類似的優化)
+    - [補充 context 優化：也可把 setter 和 getter 拆分](#補充-context-優化也可把-setter-和-getter-拆分)
+  - [小補充](#小補充)
 
 # children
 
